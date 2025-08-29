@@ -1,3 +1,12 @@
+## 2주차 과제
+### 필수 과제 - 분석
+- [API 명세서](./docs/API%20명세서.pdf)
+- [ERD](./docs/ERD.md)
+- [인프라 구성도](./docs/인프라_구성도.md)
+
+
+
+---
 ## 프로젝트
 
 ## Getting Started
