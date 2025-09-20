@@ -12,15 +12,27 @@ spring:
       max-lifetime: 60000
     driver-class-name: com.mysql.cj.jdbc.Driver
   jpa:
+    defer-datasource-initialization: true
     open-in-view: false
     generate-ddl: false
     show-sql: false
     hibernate:
-      ddl-auto: none
+      ddl-auto: create
     properties:
       hibernate.timezone.default_storage: NORMALIZE_UTC
       hibernate.jdbc.time_zone: UTC
+  sql:
+    init:
+      mode: always
+  data:
+    redis:
+      host: localhost
+      port: 6379
 
+logging:
+  level:
+    org.springframework.cache: DEBUG
+    org.springframework.data.redis.cache: DEBUG
 ---
 spring.config.activate.on-profile: local, test
 
