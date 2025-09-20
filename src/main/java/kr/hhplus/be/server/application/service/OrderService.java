@@ -1,0 +1,107 @@
+package kr.hhplus.be.server.application.service;
+
+import kr.hhplus.be.server.application.port.in.CreateOrderUseCase;
+import kr.hhplus.be.server.domain.model.OrderModels;
+import kr.hhplus.be.server.domain.port.out.CouponValidatePort;
+import kr.hhplus.be.server.domain.port.out.InventoryReservePort;
+import kr.hhplus.be.server.domain.port.out.OrderWritePort;
+import kr.hhplus.be.server.domain.port.out.ProductPricePort;
+import kr.hhplus.be.server.interfaces.web.error.ApiException;
+import kr.hhplus.be.server.interfaces.web.error.NotFoundException;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.*;
+
+@Service
+@Transactional
+@RequiredArgsConstructor
+public class OrderService implements CreateOrderUseCase {
+    private final ProductPricePort pricePort;
+    private final InventoryReservePort invPort;
+    private final CouponValidatePort couponPort;
+    private final OrderWritePort orderWritePort;
+
+    @Override
+    public Result create(Command cmd) {
+        if (cmd.userId() == null || cmd.items() == null || cmd.items().isEmpty())
+            throw new IllegalArgumentException("userId/items는 필수입니다.");
+        if (cmd.requestKey() == null || cmd.requestKey().isBlank())
+            throw new IllegalArgumentException("Idempotency-Key(requestKey)는 필수입니다.");
+
+        // 0) 멱등 처리
+        var existing = orderWritePort.findOrderIdByRequestKey(cmd.userId(), cmd.requestKey());
+        if (existing.isPresent()) {
+            Long orderId = existing.get();
+            // 멱등 재요청: 합계 재계산 없이 저장값을 그대로 읽어오는 방식도 가능.
+            // 여기서는 간단히 200/201 일관 응답을 위해 최소 Result만 리턴하도록 가정.
+            return new Result(orderId, "RESERVED", 0, 0, Optional.ofNullable(cmd.expectedTotal()).orElse(0));
+        }
+
+        // 1) 수량/중복 검사
+        Map<Long, Integer> qtyMap = new LinkedHashMap<>();
+        for (var it : cmd.items()) {
+            if (it.qty() == null || it.qty() <= 0) throw new IllegalArgumentException("qty는 1 이상이어야 합니다.");
+            qtyMap.merge(it.productId(), it.qty(), Integer::sum);
+        }
+        List<Long> productIds = new ArrayList<>(qtyMap.keySet());
+
+        // 2) 상품 가격 조회
+        var prices = pricePort.loadPrices(productIds);
+        if (prices.size() != productIds.size())
+            throw new NotFoundException("일부 상품을 찾을 수 없습니다.");
+
+        // 3) 재고 잠금 + 확인
+        var invs = invPort.lockInventories(productIds);
+        Map<Long, Integer> stockByPid = new HashMap<>();
+        invs.forEach(i -> stockByPid.put(i.productId(), i.stock()));
+        for (var pid : productIds) {
+            int need = qtyMap.get(pid);
+            int have = stockByPid.getOrDefault(pid, 0);
+            if (have < need) throw new IllegalArgumentException("재고 부족: productId=" + pid);
+        }
+
+        // 4) 금액 계산
+        List<OrderModels.OrderItem> items = new ArrayList<>();
+        int subtotal = 0;
+        for (var p : prices) {
+            int qty = qtyMap.get(p.productId());
+            int line = p.unitPrice() * qty;
+            items.add(new OrderModels.OrderItem(p.productId(), p.name(), p.unitPrice(), qty, line));
+            subtotal += line;
+        }
+
+        int discount = 0;
+        Long couponIssuanceId = null;
+        if (cmd.couponCode() != null && !cmd.couponCode().isBlank()) {
+            var couponOpt = couponPort.findApplicable(cmd.userId(), cmd.couponCode(), subtotal);
+            if (couponOpt.isEmpty()) throw new IllegalArgumentException("쿠폰이 유효하지 않습니다.");
+            var c = couponOpt.get();
+            discount = ("PERCENT".equalsIgnoreCase(c.type()))
+                    ? Math.min((subtotal * c.value()) / 100, Optional.ofNullable(c.maxDiscount()).orElse(Integer.MAX_VALUE))
+                    : c.value();
+            if (c.minAmount() != null && subtotal < c.minAmount()) discount = 0;
+            couponIssuanceId = c.issuanceId();
+        }
+        int total = Math.max(0, subtotal - discount);
+
+        if (cmd.expectedTotal() != null && !Objects.equals(cmd.expectedTotal(), total)) {
+            // throw new IllegalStateException("요청 expectedTotal(" + cmd.expectedTotal() + ")과 서버 계산값(" + total + ")이 다릅니다.");
+            throw ApiException.conflict(
+                    "/errors/total-mismatch",
+                    "Conflict",
+                    "요청 expectedTotal(" + cmd.expectedTotal() + ")과 서버 계산값(" + total + ")이 다릅니다."
+            ).with("expected", cmd.expectedTotal())
+                    .with("actual", total);
+        }
+
+        // 5) 주문 저장(RESERVED) + 재고 예약(감소, movement 기록)
+        Long orderId = orderWritePort.createReservedOrder(cmd.userId(), items, subtotal, discount, total,
+                cmd.requestKey(), couponIssuanceId);
+
+        for (var it : items) invPort.reserve(it.productId(), it.qty(), orderId);
+
+        return new Result(orderId, "RESERVED", subtotal, discount, total);
+    }
+}
