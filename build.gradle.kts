@@ -38,6 +38,21 @@ dependencies {
     // DB
 	runtimeOnly("com.mysql:mysql-connector-j")
 
+    // Lombok
+    compileOnly("org.projectlombok:lombok")
+    annotationProcessor("org.projectlombok:lombok")
+    testCompileOnly("org.projectlombok:lombok")
+    testAnnotationProcessor("org.projectlombok:lombok")
+
+    // Validation
+    implementation("org.springframework.boot:spring-boot-starter-validation")
+
+    // Redis
+    implementation("org.springframework.boot:spring-boot-starter-data-redis")
+
+    // Jackson
+    implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310")
+
     // Test
     testImplementation("org.springframework.boot:spring-boot-starter-test")
 	testImplementation("org.springframework.boot:spring-boot-testcontainers")
