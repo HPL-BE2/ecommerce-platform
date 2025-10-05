@@ -20,12 +20,16 @@ public class CacheConfig {
     @Bean CacheManager cacheManager(LettuceConnectionFactory cf){
         var conf = RedisCacheConfiguration.defaultCacheConfig()
                 .entryTtl(Duration.ofSeconds(30))
+//                .entryTtl(Duration.ofMinutes(5))
                 .disableCachingNullValues()
                 .serializeValuesWith(RedisSerializationContext.SerializationPair.fromSerializer(
                         new GenericJackson2JsonRedisSerializer()));
+        // 캐시별 설정 다르게 하기
+        var productConf = conf.entryTtl(Duration.ofMinutes(3));
+
         return RedisCacheManager.builder(cf)
                 .cacheDefaults(conf)
-                .withCacheConfiguration("products", conf.entryTtl(Duration.ofSeconds(30)))
+                .withCacheConfiguration("products", productConf)
                 .build();
     }
 }

@@ -1,0 +1,21 @@
+${AnsiColor.BRIGHT_GREEN}
+       .-.
+      (   )      🌱  Spring Boot
+       '-'        Ecommerce Platform API Server
+${AnsiColor.BRIGHT_WHITE}
+        /)   /)
+       ( •_• )     < Hello, Spring Boot! >
+       /   づ🌿
+
+${AnsiColor.BRIGHT_YELLOW}
+───────────────────────────────────────────────
+${AnsiColor.BRIGHT_CYAN}
+  Version  : ${spring-boot.version}
+  Java     : ${java.version}
+  App Name : ${spring.application.name}
+  Port     : ${server.port}
+${AnsiColor.BRIGHT_MAGENTA}
+───────────────────────────────────────────────
+${AnsiColor.BRIGHT_WHITE}
+   개발자는 장현호 ⚙️
+${AnsiColor.DEFAULT}
