@@ -14,6 +14,10 @@ import java.time.OffsetDateTime;
         })
 @Data
 public class WalletTransactionEntity {
+    protected WalletTransactionEntity() {
+        // JPA only
+    }
+
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 

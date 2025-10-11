@@ -2,7 +2,10 @@ package kr.hhplus.be.server.interfaces.web.error;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ControllerAdvice;
@@ -15,6 +18,8 @@ import java.time.OffsetDateTime;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
     @ExceptionHandler({ConstraintViolationException.class, MethodArgumentNotValidException.class})
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public ProblemDetail handleValidation(Exception ex) {
@@ -28,6 +33,11 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(Exception.class)
     @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
     public ProblemDetail handleOther(Exception ex) {
+        if (ex instanceof NoResourceFoundException nrf) {
+            log.debug("Static resource not found: {}", nrf.getResourcePath());
+        } else {
+            log.error("Unhandled exception", ex);
+        }
         ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.INTERNAL_SERVER_ERROR, "서버 오류가 발생했습니다.");
         pd.setType(java.net.URI.create("/errors/internal"));
         pd.setTitle("Internal server error");
@@ -47,6 +57,7 @@ public class GlobalExceptionHandler {
     //ApiException
     @ExceptionHandler(ApiException.class)
     public ProblemDetail handleApi(ApiException ex, HttpServletRequest req) {
+        log.error("API exception at {} {}", req.getMethod(), req.getRequestURI(), ex);
         var pd = ProblemDetail.forStatusAndDetail(ex.getStatus(), ex.getMessage()); // detail = 예외 메시지 그대로
         if (ex.getType() != null && !ex.getType().isBlank()) {
             pd.setType(java.net.URI.create(ex.getType()));

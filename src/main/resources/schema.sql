@@ -83,17 +83,52 @@ CREATE TABLE IF NOT EXISTS stock_movements (
 -- =========================
 -- 3) 주문/결제
 -- =========================
+-- =========================
+-- 3) 쿠폰
+-- =========================
+CREATE TABLE IF NOT EXISTS coupons (
+                                       id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                                       code VARCHAR(64) NOT NULL UNIQUE,
+    type VARCHAR(16) NOT NULL,               -- PERCENT/FIXED
+    value DECIMAL(10,2) NOT NULL,
+    min_amount BIGINT,
+    max_discount BIGINT,
+    starts_at TIMESTAMP NULL,
+    ends_at   TIMESTAMP NULL,
+    usage_limit INT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS coupon_issuances (
+                                                id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                                                coupon_id BIGINT NOT NULL,
+                                                user_id BIGINT NOT NULL,
+                                                issued_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                                redeem_count INT NOT NULL DEFAULT 0,
+                                                UNIQUE KEY uq_issue (coupon_id, user_id),
+    CONSTRAINT fk_ci_coupon FOREIGN KEY (coupon_id) REFERENCES coupons(id),
+    CONSTRAINT fk_ci_user   FOREIGN KEY (user_id)   REFERENCES users(id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- =========================
+-- 4) 주문/결제
+-- =========================
 CREATE TABLE IF NOT EXISTS orders (
                                       id BIGINT PRIMARY KEY AUTO_INCREMENT,
                                       user_id BIGINT NOT NULL,
                                       order_no VARCHAR(32) NOT NULL UNIQUE,
+    request_key VARCHAR(100) NOT NULL,
     status VARCHAR(16) NOT NULL,             -- PENDING/RESERVED/PAID/CANCELED/FAILED
     discount BIGINT NOT NULL DEFAULT 0,
+    coupon_issuance_id BIGINT NULL,
     total BIGINT NOT NULL,
     payment_method VARCHAR(20),              -- WALLET/CARD/...
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    CONSTRAINT fk_ord_user FOREIGN KEY (user_id) REFERENCES users(id)
+    UNIQUE KEY uq_orders_user_request (user_id, request_key),
+    CONSTRAINT fk_ord_user FOREIGN KEY (user_id) REFERENCES users(id),
+    CONSTRAINT fk_orders_coupon_issuance FOREIGN KEY (coupon_issuance_id) REFERENCES coupon_issuances(id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS order_items (
@@ -122,34 +157,6 @@ CREATE TABLE IF NOT EXISTS payments (
     CONSTRAINT fk_pay_order FOREIGN KEY (order_id) REFERENCES orders(id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- =========================
--- 4) 쿠폰
--- =========================
-CREATE TABLE IF NOT EXISTS coupons (
-                                       id BIGINT PRIMARY KEY AUTO_INCREMENT,
-                                       code VARCHAR(64) NOT NULL UNIQUE,
-    type VARCHAR(16) NOT NULL,               -- PERCENT/FIXED
-    value DECIMAL(10,2) NOT NULL,
-    min_amount BIGINT,
-    max_discount BIGINT,
-    starts_at TIMESTAMP NULL,
-    ends_at   TIMESTAMP NULL,
-    usage_limit INT,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-CREATE TABLE IF NOT EXISTS coupon_issuances (
-                                                id BIGINT PRIMARY KEY AUTO_INCREMENT,
-                                                coupon_id BIGINT NOT NULL,
-                                                user_id BIGINT NOT NULL,
-                                                issued_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                                                redeem_count INT NOT NULL DEFAULT 0,
-                                                UNIQUE KEY uq_issue (coupon_id, user_id),
-    CONSTRAINT fk_ci_coupon FOREIGN KEY (coupon_id) REFERENCES coupons(id),
-    CONSTRAINT fk_ci_user   FOREIGN KEY (user_id)   REFERENCES users(id)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
 CREATE TABLE IF NOT EXISTS coupon_redemptions (
                                                   id BIGINT PRIMARY KEY AUTO_INCREMENT,
                                                   issuance_id BIGINT NOT NULL,
@@ -169,6 +176,13 @@ CREATE TABLE IF NOT EXISTS outbox_events (
     aggregate_id   VARCHAR(64) NOT NULL,
     event_type     VARCHAR(64) NOT NULL,
     payload        JSON NOT NULL,
+    status         VARCHAR(16) NOT NULL DEFAULT 'PENDING',
+    retry_count    INT NOT NULL DEFAULT 0,
+    next_retry_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_error     TEXT NULL,
+    sent_at        TIMESTAMP NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_outbox_status_next (status, next_retry_at),
+    INDEX idx_outbox_created (created_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

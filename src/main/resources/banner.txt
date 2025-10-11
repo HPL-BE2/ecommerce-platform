@@ -13,9 +13,13 @@ ${AnsiColor.BRIGHT_CYAN}
   Version  : ${spring-boot.version}
   Java     : ${java.version}
   App Name : ${spring.application.name}
-  Port     : ${server.port}
+  Port     : ${server.port:8080}
 ${AnsiColor.BRIGHT_MAGENTA}
 ───────────────────────────────────────────────
 ${AnsiColor.BRIGHT_WHITE}
    개발자는 장현호 ⚙️
+${AnsiColor.BRIGHT_CYAN}
+  Docs     : http://localhost:${server.port:8080}/swagger-ui.html
+  OpenAPI  : http://localhost:${server.port:8080}/v3/api-docs
+  Redis UI : RedisInsight → host=localhost, port=${spring.data.redis.port}
 ${AnsiColor.DEFAULT}

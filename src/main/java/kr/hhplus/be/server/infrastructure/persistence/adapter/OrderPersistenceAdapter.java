@@ -13,6 +13,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -103,5 +104,41 @@ public class OrderPersistenceAdapter implements ProductPricePort, InventoryReser
             orderItemJpa.save(e);
         }
         return saved.getId();
+    }
+
+    @Override
+    public OrderModels.OrderSummary markOrderCompleted(Long orderId) {
+        var order = orderJpa.findById(orderId)
+                .orElseThrow(() -> new IllegalArgumentException("주문을 찾을 수 없습니다: id=" + orderId));
+
+        order.setStatus("COMPLETED");
+        order.setUpdatedAt(OffsetDateTime.now());
+        var saved = orderJpa.save(order);
+
+        var items = orderItemJpa.findByOrderId(orderId).stream()
+                .map(e -> new OrderModels.OrderItem(
+                        e.getProductId(),
+                        e.getName(),
+                        Math.toIntExact(e.getUnitPrice()),
+                        e.getQty(),
+                        Math.toIntExact(e.getLineTotal())
+                ))
+                .toList();
+
+        int subtotal = items.stream().mapToInt(OrderModels.OrderItem::lineTotal).sum();
+        int discount = Math.toIntExact(saved.getDiscount());
+        int total = Math.toIntExact(saved.getTotal());
+
+        return new OrderModels.OrderSummary(
+                saved.getId(),
+                saved.getUserId(),
+                saved.getStatus(),
+                subtotal,
+                discount,
+                total,
+                saved.getRequestKey(),
+                saved.getUpdatedAt(),
+                items
+        );
     }
 }
