@@ -56,11 +56,17 @@ public class WalletPersistenceAdapter implements WalletReadWritePort {
                 refType, refId, idempotencyKey, OffsetDateTime.now()
         );
         var saved = txJpa.saveAndFlush(e);
-        return new WalletTransaction(
-                saved.getId(), saved.getUserId(), saved.getType(), saved.getAmount(),
-                saved.getBalanceAfter(), saved.getRefType(), saved.getRefId(),
-                saved.getIdempotencyKey(), saved.getCreatedAt()
+        return toDomain(saved);
+    }
+
+    @Override
+    public WalletTransaction saveDebitTx(Long userId, long amount, long balanceAfter, String idempotencyKey, String refType, String refId) {
+        var e = new WalletTransactionEntity(
+                userId, "DEBIT", amount, balanceAfter,
+                refType, refId, idempotencyKey, OffsetDateTime.now()
         );
+        var saved = txJpa.saveAndFlush(e);
+        return toDomain(saved);
     }
 
     private WalletTransaction toDomain(WalletTransactionEntity e) {
