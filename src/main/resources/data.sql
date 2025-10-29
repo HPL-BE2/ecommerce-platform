@@ -70,6 +70,185 @@ WHERE c.code = 'WELCOME10'
 
 COMMIT;
 
+-- 주문 테이블에 쿠폰 발급 컬럼/제약 조건이 없다면 추가
+SET @has_order_coupon := (
+    SELECT COUNT(*)
+    FROM information_schema.columns
+    WHERE table_schema = DATABASE()
+      AND table_name = 'orders'
+      AND column_name = 'coupon_issuance_id'
+);
+SET @ddl := IF(
+    @has_order_coupon = 0,
+    'ALTER TABLE orders ADD COLUMN coupon_issuance_id BIGINT NULL',
+    'SELECT 1'
+);
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @has_order_coupon_fk := (
+    SELECT COUNT(*)
+    FROM information_schema.table_constraints
+    WHERE constraint_schema = DATABASE()
+      AND table_name = 'orders'
+      AND constraint_name = 'fk_orders_coupon_issuance'
+);
+SET @ddl := IF(
+    @has_order_coupon_fk = 0,
+    'ALTER TABLE orders ADD CONSTRAINT fk_orders_coupon_issuance FOREIGN KEY (coupon_issuance_id) REFERENCES coupon_issuances(id)',
+    'SELECT 1'
+);
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @has_request_key := (
+    SELECT COUNT(*)
+    FROM information_schema.columns
+    WHERE table_schema = DATABASE()
+      AND table_name = 'orders'
+      AND column_name = 'request_key'
+);
+SET @ddl := IF(
+    @has_request_key = 0,
+    'ALTER TABLE orders ADD COLUMN request_key VARCHAR(100) NULL',
+    'SELECT 1'
+);
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @has_request_key_nullable := (
+    SELECT COUNT(*)
+    FROM information_schema.columns
+    WHERE table_schema = DATABASE()
+      AND table_name = 'orders'
+      AND column_name = 'request_key'
+      AND is_nullable = 'YES'
+);
+SET @needs_request_key_fill := (
+    SELECT IFNULL(COUNT(*), 0)
+    FROM information_schema.columns
+    WHERE table_schema = DATABASE()
+      AND table_name = 'orders'
+      AND column_name = 'request_key'
+);
+SET @sql := IF(
+    @needs_request_key_fill > 0,
+    'UPDATE orders SET request_key = CONCAT(\"MIG-\", id) WHERE request_key IS NULL',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @ddl := IF(
+    @has_request_key_nullable > 0,
+    'ALTER TABLE orders MODIFY COLUMN request_key VARCHAR(100) NOT NULL',
+    'SELECT 1'
+);
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @has_request_key_idx := (
+    SELECT COUNT(*)
+    FROM information_schema.statistics
+    WHERE table_schema = DATABASE()
+      AND table_name = 'orders'
+      AND index_name = 'uq_orders_user_request'
+);
+SET @ddl := IF(
+    @has_request_key_idx = 0,
+    'ALTER TABLE orders ADD CONSTRAINT uq_orders_user_request UNIQUE KEY (user_id, request_key)',
+    'SELECT 1'
+);
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- MySQL 5.7/8.0 호환을 위해 컬럼 존재 여부를 확인한 뒤 필요한 경우만 DDL 실행
+SET @has_status := (
+    SELECT COUNT(*)
+    FROM information_schema.columns
+    WHERE table_schema = DATABASE()
+      AND table_name = 'outbox_events'
+      AND column_name = 'status'
+);
+SET @ddl := IF(
+    @has_status = 0,
+    'ALTER TABLE outbox_events ADD COLUMN status VARCHAR(16) NOT NULL DEFAULT ''PENDING''',
+    'SELECT 1'
+);
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @has_retry_count := (
+    SELECT COUNT(*)
+    FROM information_schema.columns
+    WHERE table_schema = DATABASE()
+      AND table_name = 'outbox_events'
+      AND column_name = 'retry_count'
+);
+SET @ddl := IF(
+    @has_retry_count = 0,
+    'ALTER TABLE outbox_events ADD COLUMN retry_count INT NOT NULL DEFAULT 0',
+    'SELECT 1'
+);
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @has_next_retry_at := (
+    SELECT COUNT(*)
+    FROM information_schema.columns
+    WHERE table_schema = DATABASE()
+      AND table_name = 'outbox_events'
+      AND column_name = 'next_retry_at'
+);
+SET @ddl := IF(
+    @has_next_retry_at = 0,
+    'ALTER TABLE outbox_events ADD COLUMN next_retry_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP',
+    'SELECT 1'
+);
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @has_last_error := (
+    SELECT COUNT(*)
+    FROM information_schema.columns
+    WHERE table_schema = DATABASE()
+      AND table_name = 'outbox_events'
+      AND column_name = 'last_error'
+);
+SET @ddl := IF(
+    @has_last_error = 0,
+    'ALTER TABLE outbox_events ADD COLUMN last_error TEXT NULL',
+    'SELECT 1'
+);
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @has_sent_at := (
+    SELECT COUNT(*)
+    FROM information_schema.columns
+    WHERE table_schema = DATABASE()
+      AND table_name = 'outbox_events'
+      AND column_name = 'sent_at'
+);
+SET @ddl := IF(
+    @has_sent_at = 0,
+    'ALTER TABLE outbox_events ADD COLUMN sent_at TIMESTAMP NULL',
+    'SELECT 1'
+);
+PREPARE stmt FROM @ddl;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
 -- 확인용(선택)
 -- SELECT id, sku, name, price, stock FROM products ORDER BY id;
 -- SELECT * FROM inventory ORDER BY product_id;

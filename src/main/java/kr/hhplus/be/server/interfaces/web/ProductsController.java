@@ -32,7 +32,7 @@ public class ProductsController {
         List<ProductDtos.ProductItemResponse> items = result.items().stream().map(i ->
                 new ProductDtos.ProductItemResponse(
                         i.id(), i.sku(), i.name(),
-                        new ProductDtos.ProductItemResponse.Money(i.price(), "KRW"),
+                        new ProductDtos.ProductItemResponse.Price(i.price(), "KRW"),
                         i.stock(), i.thumbnailUrl()
                 )
         ).toList();
@@ -49,7 +49,7 @@ public class ProductsController {
                         result.id(),
                         result.sku(),
                         result.name(),
-                        new ProductDtos.ProductItemResponse.Money(result.price(), "KRW"),
+                        new ProductDtos.ProductItemResponse.Price(result.price(), "KRW"),
                         result.stock(),
                         result.thumbnailUrl()
                 )

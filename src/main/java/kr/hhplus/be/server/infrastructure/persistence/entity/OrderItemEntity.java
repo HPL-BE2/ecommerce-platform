@@ -1,10 +1,12 @@
 package kr.hhplus.be.server.infrastructure.persistence.entity;
 
 import jakarta.persistence.*;
+import lombok.Getter;
 import lombok.Setter;
 
 @Entity
 @Table(name="order_items")
+@Getter
 @Setter
 public class OrderItemEntity {
     @Id @GeneratedValue(strategy=GenerationType.IDENTITY) private Long id;

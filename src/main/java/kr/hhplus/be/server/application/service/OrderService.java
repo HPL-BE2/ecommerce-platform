@@ -1,30 +1,40 @@
 package kr.hhplus.be.server.application.service;
 
+import kr.hhplus.be.server.application.port.in.CompleteOrderUseCase;
 import kr.hhplus.be.server.application.port.in.CreateOrderUseCase;
 import kr.hhplus.be.server.domain.model.OrderModels;
 import kr.hhplus.be.server.domain.port.out.CouponValidatePort;
 import kr.hhplus.be.server.domain.port.out.InventoryReservePort;
+import kr.hhplus.be.server.domain.port.out.OrderEventPublisher;
 import kr.hhplus.be.server.domain.port.out.OrderWritePort;
 import kr.hhplus.be.server.domain.port.out.ProductPricePort;
+import kr.hhplus.be.server.domain.port.out.dto.OrderCompletedEvent;
 import kr.hhplus.be.server.interfaces.web.error.ApiException;
 import kr.hhplus.be.server.interfaces.web.error.NotFoundException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 
 @Service
 @Transactional
 @RequiredArgsConstructor
-public class OrderService implements CreateOrderUseCase {
+public class OrderService implements CreateOrderUseCase, CompleteOrderUseCase {
     private final ProductPricePort pricePort;
     private final InventoryReservePort invPort;
     private final CouponValidatePort couponPort;
     private final OrderWritePort orderWritePort;
+    private final OrderEventPublisher orderEventPublisher;
 
     @Override
-    public Result create(Command cmd) {
+    public CreateOrderUseCase.Result create(CreateOrderUseCase.Command cmd) {
         if (cmd.userId() == null || cmd.items() == null || cmd.items().isEmpty())
             throw new IllegalArgumentException("userId/items는 필수입니다.");
         if (cmd.requestKey() == null || cmd.requestKey().isBlank())
@@ -36,7 +46,7 @@ public class OrderService implements CreateOrderUseCase {
             Long orderId = existing.get();
             // 멱등 재요청: 합계 재계산 없이 저장값을 그대로 읽어오는 방식도 가능.
             // 여기서는 간단히 200/201 일관 응답을 위해 최소 Result만 리턴하도록 가정.
-            return new Result(orderId, "RESERVED", 0, 0, Optional.ofNullable(cmd.expectedTotal()).orElse(0));
+            return new CreateOrderUseCase.Result(orderId, "RESERVED", 0, 0, Optional.ofNullable(cmd.expectedTotal()).orElse(0));
         }
 
         // 1) 수량/중복 검사
@@ -102,6 +112,38 @@ public class OrderService implements CreateOrderUseCase {
 
         for (var it : items) invPort.reserve(it.productId(), it.qty(), orderId);
 
-        return new Result(orderId, "RESERVED", subtotal, discount, total);
+        return new CreateOrderUseCase.Result(orderId, "RESERVED", subtotal, discount, total);
+    }
+
+    @Override
+    public CompleteOrderUseCase.Result complete(CompleteOrderUseCase.Command command) {
+        if (command.orderId() == null) {
+            throw new IllegalArgumentException("orderId는 필수입니다.");
+        }
+
+        OrderModels.OrderSummary summary = orderWritePort.markOrderCompleted(command.orderId());
+
+        var event = new OrderCompletedEvent(
+                summary.orderId(),
+                summary.userId(),
+                summary.subtotal(),
+                summary.discount(),
+                summary.total(),
+                summary.requestKey(),
+                summary.completedAt(),
+                summary.items().stream()
+                        .map(it -> new OrderCompletedEvent.Item(
+                                it.productId(),
+                                it.name(),
+                                it.unitPrice(),
+                                it.qty(),
+                                it.lineTotal()
+                        ))
+                        .toList()
+        );
+
+        orderEventPublisher.publish(event);
+
+        return new CompleteOrderUseCase.Result(summary.orderId(), summary.total());
     }
 }

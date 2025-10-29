@@ -1,5 +1,6 @@
 package kr.hhplus.be.server.interfaces.web;
 
+import kr.hhplus.be.server.application.port.in.CompleteOrderUseCase;
 import kr.hhplus.be.server.application.port.in.CreateOrderUseCase;
 import kr.hhplus.be.server.interfaces.web.dto.ApiEnvelope;
 import kr.hhplus.be.server.interfaces.web.dto.OrderDtos;
@@ -12,6 +13,7 @@ import org.springframework.web.bind.annotation.*;
 @RequiredArgsConstructor
 public class OrderController {
     private final CreateOrderUseCase createOrder;
+    private final CompleteOrderUseCase completeOrder;
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
@@ -28,10 +30,16 @@ public class OrderController {
         return new ApiEnvelope<>(
                 new OrderDtos.CreateOrderResponse(
                         r.orderId(), r.status(),
-                        new OrderDtos.CreateOrderResponse.Money(r.subtotal(), "KRW"),
-                        new OrderDtos.CreateOrderResponse.Money(r.discount(), "KRW"),
-                        new OrderDtos.CreateOrderResponse.Money(r.total(), "KRW")
+                        new OrderDtos.CreateOrderResponse.Breakdown(r.subtotal(), "KRW"),
+                        new OrderDtos.CreateOrderResponse.Breakdown(r.discount(), "KRW"),
+                        new OrderDtos.CreateOrderResponse.Breakdown(r.total(), "KRW")
                 )
         );
+    }
+
+    @PatchMapping("/{orderId}/complete")
+    public ApiEnvelope<OrderDtos.CompleteOrderResponse> complete(@PathVariable Long orderId) {
+        var result = completeOrder.complete(new CompleteOrderUseCase.Command(orderId));
+        return new ApiEnvelope<>(new OrderDtos.CompleteOrderResponse(result.orderId(), result.total()));
     }
 }
