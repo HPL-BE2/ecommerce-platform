@@ -39,17 +39,19 @@ public class OrderPersistenceAdapter implements ProductPricePort, InventoryReser
 
     @Override
     public void reserve(Long productId, int qty, Long orderId) {
-        var inv = invJpa.findById(productId).orElseThrow();
-        invJpa.lockByProductIds(List.of(productId)); // 보강
-        if (inv.getStock() < qty) throw new IllegalStateException("재고 부족: " + productId);
-        // 감소
-        try {
-            var f = inv.getClass().getDeclaredField("stock"); // 세터 없는 경우 대응
-            f.setAccessible(true);
-            f.set(inv, inv.getStock() - qty);
-        } catch (Exception ignore) {}
+        // Optimistic Lock 사용: @Version 필드로 동시성 제어
+        var inv = invJpa.findById(productId)
+                .orElseThrow(() -> new IllegalArgumentException("재고를 찾을 수 없습니다: productId=" + productId));
+
+        // 재고 감소 (InventoryEntity.decreaseStock() 내부에서 재고 검증)
+        inv.decreaseStock(qty);
+
+        // 재고 변경 저장 (Optimistic Lock - version 자동 증가)
         invJpa.save(inv);
-        movementJpa.save(new StockMovementEntity(productId, -qty, "RESERVE", String.valueOf(orderId)));
+
+        // 재고 이력 기록 (orderId가 null이면 "PENDING"으로 기록)
+        String reference = orderId != null ? String.valueOf(orderId) : "PENDING";
+        movementJpa.save(new StockMovementEntity(productId, -qty, "RESERVE", reference));
     }
 
     // --- ProductPricePort ---

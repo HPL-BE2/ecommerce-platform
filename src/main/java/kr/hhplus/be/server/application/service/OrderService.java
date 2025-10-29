@@ -62,15 +62,10 @@ public class OrderService implements CreateOrderUseCase, CompleteOrderUseCase {
         if (prices.size() != productIds.size())
             throw new NotFoundException("일부 상품을 찾을 수 없습니다.");
 
-        // 3) 재고 잠금 + 확인
+        // 3) 재고 조회 (Optimistic Lock - 락 없이 조회만)
         var invs = invPort.lockInventories(productIds);
         Map<Long, Integer> stockByPid = new HashMap<>();
         invs.forEach(i -> stockByPid.put(i.productId(), i.stock()));
-        for (var pid : productIds) {
-            int need = qtyMap.get(pid);
-            int have = stockByPid.getOrDefault(pid, 0);
-            if (have < need) throw new IllegalArgumentException("재고 부족: productId=" + pid);
-        }
 
         // 4) 금액 계산
         List<OrderModels.OrderItem> items = new ArrayList<>();
@@ -106,11 +101,14 @@ public class OrderService implements CreateOrderUseCase, CompleteOrderUseCase {
                     .with("actual", total);
         }
 
-        // 5) 주문 저장(RESERVED) + 재고 예약(감소, movement 기록)
+        // 5) 재고 예약(감소) - 주문 생성 이전에 실행 (원자성 보장)
+        // Optimistic Lock: @Version 필드로 동시성 제어
+        // 재고 부족 시 IllegalStateException 발생 → 트랜잭션 롤백
+        for (var it : items) invPort.reserve(it.productId(), it.qty(), null); // orderId는 아직 없으므로 null
+
+        // 6) 주문 저장(RESERVED)
         Long orderId = orderWritePort.createReservedOrder(cmd.userId(), items, subtotal, discount, total,
                 cmd.requestKey(), couponIssuanceId);
-
-        for (var it : items) invPort.reserve(it.productId(), it.qty(), orderId);
 
         return new CreateOrderUseCase.Result(orderId, "RESERVED", subtotal, discount, total);
     }
