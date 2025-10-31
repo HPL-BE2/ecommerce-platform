@@ -17,7 +17,7 @@ public class WalletService implements CreateWalletTopupUseCase, CreateWalletDebi
 
     @Override
     @Transactional
-    public Result topup(Command cmd) {
+    public CreateWalletTopupUseCase.Result topup(CreateWalletTopupUseCase.Command cmd) {
         if (cmd.userId() == null || cmd.amount() == null || cmd.amount() <= 0)
             throw new IllegalArgumentException("userId/amount는 필수이며 amount>0 이어야 합니다.");
         if (cmd.idempotencyKey() == null || cmd.idempotencyKey().isBlank())
@@ -27,7 +27,7 @@ public class WalletService implements CreateWalletTopupUseCase, CreateWalletDebi
         var existing = rwPort.findTxByIdempotency(cmd.userId(), cmd.idempotencyKey());
         if (existing.isPresent()) {
             WalletTransaction tx = existing.get();
-            return new Result(tx.id(), tx.balanceAfter(), true);
+            return new CreateWalletTopupUseCase.Result(tx.id(), tx.balanceAfter(), true);
         }
 
         // 2) 지갑 행 잠금 or 생성
@@ -53,7 +53,7 @@ public class WalletService implements CreateWalletTopupUseCase, CreateWalletDebi
         // 4) 지갑 잔액 반영
         rwPort.updateBalance(cmd.userId(), newBalance);
 
-        return new Result(tx.id(), newBalance, false);
+        return new CreateWalletTopupUseCase.Result(tx.id(), newBalance, false);
     }
 
     @Override
