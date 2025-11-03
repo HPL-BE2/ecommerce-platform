@@ -1,4 +1,7 @@
 # Ecommerce Platform
+## 라운지 ...
+<img width="608" height="291" alt="image" src="https://github.com/user-attachments/assets/b488855a-db89-49e8-b4b0-d3f663df4b58" />
+
 
 ## Overview
 This project is a Spring Boot 3 application that exposes a small but production-style ecommerce API. It follows a layered/hexagonal layout with REST controllers, application services, domain models, and infrastructure adapters that collaborate to deliver product browsing, wallet top-ups, and order orchestration features. Caching is enabled globally and the application logs the supported endpoints on startup for quick visibility.【F:src/main/java/kr/hhplus/be/server/ServerApplication.java†L15-L47】【F:src/main/java/kr/hhplus/be/server/application/service/ProductService.java†L15-L50】【F:src/main/java/kr/hhplus/be/server/application/service/OrderService.java†L26-L148】【F:src/main/java/kr/hhplus/be/server/application/service/WalletService.java†L12-L55】【F:src/main/java/kr/hhplus/be/server/infrastructure/config/CacheConfig.java†L16-L33】
