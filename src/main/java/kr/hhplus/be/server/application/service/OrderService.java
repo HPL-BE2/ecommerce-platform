@@ -2,6 +2,7 @@ package kr.hhplus.be.server.application.service;
 
 import kr.hhplus.be.server.application.port.in.CompleteOrderUseCase;
 import kr.hhplus.be.server.application.port.in.CreateOrderUseCase;
+import kr.hhplus.be.server.application.port.in.CreateWalletDebitUseCase;
 import kr.hhplus.be.server.domain.model.OrderModels;
 import kr.hhplus.be.server.domain.port.out.CouponValidatePort;
 import kr.hhplus.be.server.domain.port.out.InventoryReservePort;
@@ -32,6 +33,7 @@ public class OrderService implements CreateOrderUseCase, CompleteOrderUseCase {
     private final CouponValidatePort couponPort;
     private final OrderWritePort orderWritePort;
     private final OrderEventPublisher orderEventPublisher;
+    private final WalletService walletService;
 
     @Override
     public CreateOrderUseCase.Result create(CreateOrderUseCase.Command cmd) {
@@ -62,15 +64,10 @@ public class OrderService implements CreateOrderUseCase, CompleteOrderUseCase {
         if (prices.size() != productIds.size())
             throw new NotFoundException("일부 상품을 찾을 수 없습니다.");
 
-        // 3) 재고 잠금 + 확인
+        // 3) 재고 조회 (Optimistic Lock - 락 없이 조회만)
         var invs = invPort.lockInventories(productIds);
         Map<Long, Integer> stockByPid = new HashMap<>();
         invs.forEach(i -> stockByPid.put(i.productId(), i.stock()));
-        for (var pid : productIds) {
-            int need = qtyMap.get(pid);
-            int have = stockByPid.getOrDefault(pid, 0);
-            if (have < need) throw new IllegalArgumentException("재고 부족: productId=" + pid);
-        }
 
         // 4) 금액 계산
         List<OrderModels.OrderItem> items = new ArrayList<>();
@@ -106,11 +103,24 @@ public class OrderService implements CreateOrderUseCase, CompleteOrderUseCase {
                     .with("actual", total);
         }
 
-        // 5) 주문 저장(RESERVED) + 재고 예약(감소, movement 기록)
+        // 5) 재고 예약(감소) - 주문 생성 이전에 실행 (원자성 보장)
+        // Optimistic Lock: @Version 필드로 동시성 제어
+        // 재고 부족 시 IllegalStateException 발생 → 트랜잭션 롤백
+        for (var it : items) invPort.reserve(it.productId(), it.qty(), null); // orderId는 아직 없으므로 null
+
+        // 6) 결제 처리 (잔액 차감) - Pessimistic Lock으로 동시성 제어
+        // Idempotency Key: "ORDER:" + requestKey (중복 결제 방지)
+        walletService.debit(new CreateWalletDebitUseCase.Command(
+                cmd.userId(),
+                (long) total,
+                "ORDER:" + cmd.requestKey(),  // 멱등키: 주문별 고유
+                "ORDER",                       // 참조 타입
+                cmd.requestKey()              // 참조 ID (주문 requestKey)
+        ));
+
+        // 7) 주문 저장(RESERVED)
         Long orderId = orderWritePort.createReservedOrder(cmd.userId(), items, subtotal, discount, total,
                 cmd.requestKey(), couponIssuanceId);
-
-        for (var it : items) invPort.reserve(it.productId(), it.qty(), orderId);
 
         return new CreateOrderUseCase.Result(orderId, "RESERVED", subtotal, discount, total);
     }

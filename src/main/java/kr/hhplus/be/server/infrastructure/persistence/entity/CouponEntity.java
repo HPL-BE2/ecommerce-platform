@@ -15,5 +15,7 @@ public class CouponEntity {
     @Column(nullable=false) private Integer value;
     @Column(name="min_amount") private Integer minAmount;
     @Column(name="max_discount") private Integer maxDiscount;
-    private OffsetDateTime startsAt; private OffsetDateTime endsAt;
+    @Column(name="max_issuance") private Integer maxIssuance; // 최대 발급 수량 (선착순 제한)
+    private OffsetDateTime startsAt;
+    private OffsetDateTime endsAt;
 }
