@@ -3,6 +3,7 @@ package kr.hhplus.be.server.application.service;
 import kr.hhplus.be.server.application.port.in.IssueCouponUseCase;
 import kr.hhplus.be.server.domain.model.Coupon;
 import kr.hhplus.be.server.domain.port.out.CouponReadWritePort;
+import kr.hhplus.be.server.infrastructure.persistence.adapter.CouponPersistenceAdapter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -14,6 +15,7 @@ import java.time.OffsetDateTime;
 @RequiredArgsConstructor
 public class CouponService implements IssueCouponUseCase {
     private final CouponReadWritePort couponPort;
+    private final CouponPersistenceAdapter couponAdapter;
     // TODO: Redis 추가 시 사용
     // private final RedisTemplate<String, Long> redisTemplate;
 
@@ -38,7 +40,8 @@ public class CouponService implements IssueCouponUseCase {
             throw new IllegalStateException("이미 발급받은 쿠폰입니다: couponId=" + cmd.couponId() + ", userId=" + cmd.userId());
         }
 
-        // 4) 발급 수량 제한 확인 (동시성 제어)
+        // 4) 발급 수량 제한 확인 및 원자적 증가 (동시성 제어)
+        // Pessimistic Lock을 사용하여 Race Condition 방지
         // TODO: Redis Atomic Counter 사용 시 성능 개선
         // String redisKey = "coupon:" + cmd.couponId() + ":count";
         // Long count = redisTemplate.opsForValue().increment(redisKey);
@@ -48,8 +51,9 @@ public class CouponService implements IssueCouponUseCase {
         // }
 
         if (coupon.hasIssuanceLimit()) {
-            long currentCount = couponPort.countIssuances(cmd.couponId());
-            if (currentCount >= coupon.maxIssuance()) {
+            // 원자적으로 수량 증가 시도 (Pessimistic Lock 사용)
+            boolean success = couponAdapter.tryIncrementIssuedCount(cmd.couponId());
+            if (!success) {
                 throw new IllegalStateException("쿠폰이 모두 소진되었습니다: couponId=" + cmd.couponId());
             }
         }

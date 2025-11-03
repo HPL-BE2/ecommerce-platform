@@ -10,6 +10,9 @@ import kr.hhplus.be.server.infrastructure.persistence.entity.OrderItemEntity;
 import kr.hhplus.be.server.infrastructure.persistence.entity.StockMovementEntity;
 import kr.hhplus.be.server.infrastructure.persistence.repo.*;
 import lombok.RequiredArgsConstructor;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
+import org.springframework.retry.annotation.Backoff;
+import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -30,6 +33,9 @@ public class OrderPersistenceAdapter implements ProductPricePort, InventoryReser
     private final SpringCouponJpa couponJpa;
     private final SpringCouponIssuanceJpa issuanceJpa;
 
+    // 트랜잭션별 임시 참조 ID 저장 (재고 이력 추적용)
+    private static final ThreadLocal<String> TEMP_REF_ID = new ThreadLocal<>();
+
     // --- InventoryReservePort ---
     @Override
     public List<OrderModels.Inventory> lockInventories(List<Long> productIds) {
@@ -38,6 +44,11 @@ public class OrderPersistenceAdapter implements ProductPricePort, InventoryReser
     }
 
     @Override
+    @Retryable(
+            retryFor = {ObjectOptimisticLockingFailureException.class},
+            maxAttempts = 3,
+            backoff = @Backoff(delay = 100, multiplier = 2)
+    )
     public void reserve(Long productId, int qty, Long orderId) {
         // Optimistic Lock 사용: @Version 필드로 동시성 제어
         var inv = invJpa.findById(productId)
@@ -49,8 +60,18 @@ public class OrderPersistenceAdapter implements ProductPricePort, InventoryReser
         // 재고 변경 저장 (Optimistic Lock - version 자동 증가)
         invJpa.save(inv);
 
-        // 재고 이력 기록 (orderId가 null이면 "PENDING"으로 기록)
-        String reference = orderId != null ? String.valueOf(orderId) : "PENDING";
+        // 재고 이력 기록
+        String reference;
+        if (orderId != null) {
+            reference = String.valueOf(orderId);
+        } else {
+            // orderId가 null이면 트랜잭션별 고유 임시 키 생성/사용
+            reference = TEMP_REF_ID.get();
+            if (reference == null) {
+                reference = "TEMP:" + UUID.randomUUID().toString();
+                TEMP_REF_ID.set(reference);
+            }
+        }
         movementJpa.save(new StockMovementEntity(productId, -qty, "RESERVE", reference));
     }
 
@@ -86,26 +107,41 @@ public class OrderPersistenceAdapter implements ProductPricePort, InventoryReser
 
     @Override
     public Long createReservedOrder(Long userId, List<OrderModels.OrderItem> items, int subtotal, int discount, int total, String requestKey, Long couponIssuanceId) {
-        var o = new OrderEntity();
-        o.setUserId(userId);
-        o.setOrderNo(UUID.randomUUID().toString().replace("-", "").substring(0, 16));
-        o.setStatus("RESERVED");
-        o.setDiscount((long) discount);
-        o.setTotal((long) total);
-        o.setRequestKey(requestKey);
-        o.setCouponIssuanceId(couponIssuanceId);
-        var saved = orderJpa.save(o);
-        for (var it : items) {
-            var e = new OrderItemEntity();
-            e.setOrderId(saved.getId());
-            e.setProductId(it.productId());
-            e.setName(it.name());
-            e.setQty(it.qty());
-            e.setUnitPrice((long) it.unitPrice());
-            e.setLineTotal((long) it.lineTotal());
-            orderItemJpa.save(e);
+        try {
+            var o = new OrderEntity();
+            o.setUserId(userId);
+            o.setOrderNo(UUID.randomUUID().toString().replace("-", "").substring(0, 16));
+            o.setStatus("RESERVED");
+            o.setDiscount((long) discount);
+            o.setTotal((long) total);
+            o.setRequestKey(requestKey);
+            o.setCouponIssuanceId(couponIssuanceId);
+            var saved = orderJpa.save(o);
+
+            for (var it : items) {
+                var e = new OrderItemEntity();
+                e.setOrderId(saved.getId());
+                e.setProductId(it.productId());
+                e.setName(it.name());
+                e.setQty(it.qty());
+                e.setUnitPrice((long) it.unitPrice());
+                e.setLineTotal((long) it.lineTotal());
+                orderItemJpa.save(e);
+            }
+
+            // 재고 이력의 refId 업데이트 (임시 키 -> orderId)
+            // ThreadLocal에서 임시 키를 가져와서 실제 orderId로 업데이트
+            String tempRefId = TEMP_REF_ID.get();
+            if (tempRefId != null) {
+                int updatedCount = movementJpa.updateRefId(tempRefId, String.valueOf(saved.getId()));
+                // updatedCount가 items 개수와 같아야 정상
+            }
+
+            return saved.getId();
+        } finally {
+            // ThreadLocal 정리 (메모리 누수 방지)
+            TEMP_REF_ID.remove();
         }
-        return saved.getId();
     }
 
     @Override

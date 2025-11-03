@@ -47,14 +47,16 @@ WHERE p.sku IN ('SKU-1001','SKU-1002','SKU-1003','SKU-1004','SKU-1005')
 
 -- 4) 쿠폰
 INSERT INTO coupons
-(code, type, value, min_amount, max_discount, starts_at, ends_at, usage_limit)
+(code, type, value, min_amount, max_discount, max_issuance, issued_count, starts_at, ends_at, usage_limit)
 VALUES
-    ('WELCOME10', 'PERCENT', 10.00, 50000, 20000, NOW(), DATE_ADD(NOW(), INTERVAL 1 DAY), NULL)
+    ('WELCOME10', 'PERCENT', 10.00, 50000, 20000, 100, 0, NOW(), DATE_ADD(NOW(), INTERVAL 1 DAY), NULL)
     ON DUPLICATE KEY UPDATE
                          type         = VALUES(type),
                          value        = VALUES(value),
                          min_amount   = VALUES(min_amount),
                          max_discount = VALUES(max_discount),
+                         max_issuance = VALUES(max_issuance),
+                         issued_count = VALUES(issued_count),
                          starts_at    = VALUES(starts_at),
                          ends_at      = VALUES(ends_at),
                          usage_limit  = VALUES(usage_limit);
