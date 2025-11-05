@@ -39,6 +39,31 @@ public class CouponPersistenceAdapter implements CouponReadWritePort {
         return saved.getId();
     }
 
+    /**
+     * 쿠폰 발급 수량을 원자적으로 증가시키고 성공 여부를 반환
+     * Pessimistic Lock을 사용하여 동시성 제어
+     *
+     * @param couponId 쿠폰 ID
+     * @return 발급 성공 여부 (true: 성공, false: 수량 제한 초과)
+     */
+    public boolean tryIncrementIssuedCount(Long couponId) {
+        // Pessimistic Write Lock으로 쿠폰 조회
+        var coupon = couponJpa.findByIdWithLock(couponId)
+                .orElseThrow(() -> new IllegalArgumentException("쿠폰을 찾을 수 없습니다: couponId=" + couponId));
+
+        // 발급 제한이 있는 경우에만 체크
+        if (coupon.getMaxIssuance() != null) {
+            if (coupon.getIssuedCount() >= coupon.getMaxIssuance()) {
+                return false; // 발급 수량 초과
+            }
+        }
+
+        // 발급 수량 증가
+        coupon.setIssuedCount(coupon.getIssuedCount() + 1);
+        couponJpa.save(coupon);
+        return true;
+    }
+
     @Override
     public boolean isAlreadyIssued(Long couponId, Long userId) {
         return issuanceJpa.findByCouponIdAndUserId(couponId, userId).isPresent();

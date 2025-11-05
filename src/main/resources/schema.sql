@@ -93,6 +93,8 @@ CREATE TABLE IF NOT EXISTS coupons (
     value DECIMAL(10,2) NOT NULL,
     min_amount BIGINT,
     max_discount BIGINT,
+    max_issuance INT,                        -- 최대 발급 수량 (선착순 제한)
+    issued_count INT NOT NULL DEFAULT 0,     -- 현재 발급된 수량 (동시성 제어용)
     starts_at TIMESTAMP NULL,
     ends_at   TIMESTAMP NULL,
     usage_limit INT,
