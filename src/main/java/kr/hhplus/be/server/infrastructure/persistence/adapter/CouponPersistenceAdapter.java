@@ -7,6 +7,7 @@ import kr.hhplus.be.server.infrastructure.persistence.entity.CouponIssuanceEntit
 import kr.hhplus.be.server.infrastructure.persistence.repo.SpringCouponIssuanceJpa;
 import kr.hhplus.be.server.infrastructure.persistence.repo.SpringCouponJpa;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,6 +21,7 @@ public class CouponPersistenceAdapter implements CouponReadWritePort {
     private final SpringCouponIssuanceJpa issuanceJpa;
 
     @Override
+    @Cacheable(cacheNames = "coupon-info", key = "#couponId", unless = "#result.isEmpty()")
     public Optional<Coupon> findById(Long couponId) {
         return couponJpa.findById(couponId).map(this::toDomain);
     }

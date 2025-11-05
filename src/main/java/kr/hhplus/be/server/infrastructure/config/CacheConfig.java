@@ -43,6 +43,7 @@ public class CacheConfig {
 
         // 캐시별 설정
         var productConf = conf.entryTtl(Duration.ofMinutes(3));
+        var couponInfoConf = conf.entryTtl(Duration.ofMinutes(5));
         var activeCouponsConf = conf.entryTtl(Duration.ofMinutes(5));
         var userOrdersConf = conf.entryTtl(Duration.ofMinutes(10));
         var orderDetailConf = conf.entryTtl(Duration.ofMinutes(10));
@@ -50,6 +51,7 @@ public class CacheConfig {
         return RedisCacheManager.builder(cf)
                 .cacheDefaults(conf)
                 .withCacheConfiguration("products", productConf)
+                .withCacheConfiguration("coupon-info", couponInfoConf)
                 .withCacheConfiguration("active-coupons", activeCouponsConf)
                 .withCacheConfiguration("user-orders", userOrdersConf)
                 .withCacheConfiguration("order-detail", orderDetailConf)
