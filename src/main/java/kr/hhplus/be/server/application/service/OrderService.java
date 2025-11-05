@@ -34,6 +34,7 @@ public class OrderService implements CreateOrderUseCase, CompleteOrderUseCase {
     private final OrderWritePort orderWritePort;
     private final OrderEventPublisher orderEventPublisher;
     private final WalletService walletService;
+    private final InventoryService inventoryService;
 
     @Override
     public CreateOrderUseCase.Result create(CreateOrderUseCase.Command cmd) {
@@ -104,9 +105,12 @@ public class OrderService implements CreateOrderUseCase, CompleteOrderUseCase {
         }
 
         // 5) 재고 예약(감소) - 주문 생성 이전에 실행 (원자성 보장)
-        // Optimistic Lock: @Version 필드로 동시성 제어
+        // 분산락 + Redis 캐시: 상품별 동시성 제어
+        // Redis 캐시에서 빠른 실패, DB에서 최종 검증
         // 재고 부족 시 IllegalStateException 발생 → 트랜잭션 롤백
-        for (var it : items) invPort.reserve(it.productId(), it.qty(), null); // orderId는 아직 없으므로 null
+        for (var it : items) {
+            inventoryService.reserveWithLock(it.productId(), it.qty(), null); // orderId는 아직 없으므로 null
+        }
 
         // 6) 결제 처리 (잔액 차감) - Pessimistic Lock으로 동시성 제어
         // Idempotency Key: "ORDER:" + requestKey (중복 결제 방지)
