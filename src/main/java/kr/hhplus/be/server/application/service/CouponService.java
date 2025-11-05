@@ -3,9 +3,12 @@ package kr.hhplus.be.server.application.service;
 import kr.hhplus.be.server.application.port.in.IssueCouponUseCase;
 import kr.hhplus.be.server.domain.model.Coupon;
 import kr.hhplus.be.server.domain.port.out.CouponReadWritePort;
+import kr.hhplus.be.server.infrastructure.lock.DistributedLock;
 import kr.hhplus.be.server.infrastructure.persistence.adapter.CouponPersistenceAdapter;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -13,13 +16,19 @@ import java.time.OffsetDateTime;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class CouponService implements IssueCouponUseCase {
     private final CouponReadWritePort couponPort;
     private final CouponPersistenceAdapter couponAdapter;
-    // TODO: Redis 추가 시 사용
-    // private final RedisTemplate<String, Long> redisTemplate;
+    private final RedisTemplate<String, Object> redisTemplate;
 
     @Override
+    @DistributedLock(
+            key = "'coupon:' + #cmd.couponId() + ':lock'",
+            leaseTime = 5000,
+            waitTime = 3000,
+            failMessage = "쿠폰 발급 요청이 집중되어 처리할 수 없습니다. 잠시 후 다시 시도해주세요."
+    )
     @Transactional
     public Result issue(Command cmd) {
         if (cmd.couponId() == null || cmd.userId() == null) {
@@ -35,35 +44,47 @@ public class CouponService implements IssueCouponUseCase {
             throw new IllegalStateException("쿠폰 발급 기간이 아닙니다: couponId=" + cmd.couponId());
         }
 
-        // 3) 중복 발급 확인
+        // 3) 중복 발급 확인 (빠른 실패)
         if (couponPort.isAlreadyIssued(cmd.couponId(), cmd.userId())) {
             throw new IllegalStateException("이미 발급받은 쿠폰입니다: couponId=" + cmd.couponId() + ", userId=" + cmd.userId());
         }
 
-        // 4) 발급 수량 제한 확인 및 원자적 증가 (동시성 제어)
-        // Pessimistic Lock을 사용하여 Race Condition 방지
-        // TODO: Redis Atomic Counter 사용 시 성능 개선
-        // String redisKey = "coupon:" + cmd.couponId() + ":count";
-        // Long count = redisTemplate.opsForValue().increment(redisKey);
-        // if (count > coupon.maxIssuance()) {
-        //     redisTemplate.opsForValue().decrement(redisKey); // 보상
-        //     throw new IllegalStateException("쿠폰이 모두 소진되었습니다.");
-        // }
-
+        // 4) Redis Atomic Counter로 발급 수량 제한 확인 (성능 개선)
         if (coupon.hasIssuanceLimit()) {
-            // 원자적으로 수량 증가 시도 (Pessimistic Lock 사용)
-            boolean success = couponAdapter.tryIncrementIssuedCount(cmd.couponId());
-            if (!success) {
+            String countKey = "coupon:" + cmd.couponId() + ":issued";
+
+            // Redis Atomic Increment (분산 환경에서 원자적 증가)
+            Long currentCount = redisTemplate.opsForValue().increment(countKey);
+
+            log.debug("[CouponService] 쿠폰 발급 시도: couponId={}, currentCount={}, maxIssuance={}",
+                    cmd.couponId(), currentCount, coupon.maxIssuance());
+
+            // 최대 발급량 초과 체크
+            if (currentCount > coupon.maxIssuance()) {
+                // 초과된 카운트 롤백
+                redisTemplate.opsForValue().decrement(countKey);
+                log.warn("[CouponService] 쿠폰 소진: couponId={}, attemptedCount={}, maxIssuance={}",
+                        cmd.couponId(), currentCount, coupon.maxIssuance());
                 throw new IllegalStateException("쿠폰이 모두 소진되었습니다: couponId=" + cmd.couponId());
             }
         }
 
-        // 5) 쿠폰 발급
+        // 5) 쿠폰 발급 (DB에 기록)
         Long issuanceId;
         try {
             issuanceId = couponPort.issueCoupon(cmd.couponId(), cmd.userId());
+            log.info("[CouponService] 쿠폰 발급 성공: issuanceId={}, couponId={}, userId={}",
+                    issuanceId, cmd.couponId(), cmd.userId());
+
         } catch (DataIntegrityViolationException e) {
             // UNIQUE 제약 위반 (동시 요청으로 인한 중복 발급 시도)
+            // Redis 카운터 롤백
+            if (coupon.hasIssuanceLimit()) {
+                String countKey = "coupon:" + cmd.couponId() + ":issued";
+                redisTemplate.opsForValue().decrement(countKey);
+                log.warn("[CouponService] 중복 발급 시도로 인한 롤백: couponId={}, userId={}",
+                        cmd.couponId(), cmd.userId());
+            }
             throw new IllegalStateException("이미 발급받은 쿠폰입니다: couponId=" + cmd.couponId() + ", userId=" + cmd.userId());
         }
 
