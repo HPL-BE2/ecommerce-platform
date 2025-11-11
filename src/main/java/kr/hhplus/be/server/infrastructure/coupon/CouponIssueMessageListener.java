@@ -32,7 +32,29 @@ public class CouponIssueMessageListener {
         } catch (DataAccessException | IllegalStateException ex) {
             log.error("[CouponIssueListener] 쿠폰 발급 처리 실패 requestId={} couponId={} userId={}",
                     message.requestId(), message.couponId(), message.userId(), ex);
+            compensateReservation(message);
             throw ex;
+        }
+    }
+
+    private void compensateReservation(CouponIssueMessage message) {
+        String issuedUsersKey = CouponRedisKeys.issuedUsers(message.couponId());
+        String remainingKey = CouponRedisKeys.remainingCount(message.couponId());
+
+        try {
+            Long removed = counterRedisTemplate.opsForSet()
+                    .remove(issuedUsersKey, String.valueOf(message.userId()));
+            if (removed != null && removed > 0) {
+                counterRedisTemplate.opsForValue().increment(remainingKey);
+                log.info("[CouponIssueListener] 쿠폰 발급 실패로 슬롯 복원 requestId={} couponId={} userId={}",
+                        message.requestId(), message.couponId(), message.userId());
+            } else {
+                log.warn("[CouponIssueListener] 쿠폰 발급 실패 보상 처리 대상 슬롯을 찾을 수 없음 requestId={} couponId={} userId={}",
+                        message.requestId(), message.couponId(), message.userId());
+            }
+        } catch (Exception recoveryEx) {
+            log.error("[CouponIssueListener] 쿠폰 발급 실패 보상 처리 중 오류 requestId={} couponId={} userId={}",
+                    message.requestId(), message.couponId(), message.userId(), recoveryEx);
         }
     }
 }
