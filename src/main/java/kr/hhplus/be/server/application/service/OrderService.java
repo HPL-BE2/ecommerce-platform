@@ -108,7 +108,16 @@ public class OrderService implements CreateOrderUseCase, CompleteOrderUseCase {
         // 분산락 + Redis 캐시: 상품별 동시성 제어
         // Redis 캐시에서 빠른 실패, DB에서 최종 검증
         // 재고 부족 시 IllegalStateException 발생 → 트랜잭션 롤백
-        for (var it : items) {
+        //
+        // [데드락 방지] productId 오름차순으로 정렬하여 락 획득 순서 통일
+        // 예시: User A [상품1, 상품2], User B [상품2, 상품1]
+        //       정렬 없이는 서로 Lock(1), Lock(2) 대기 → 데드락
+        //       정렬하면 모두 Lock(1) → Lock(2) 순서로 통일 → 데드락 방지
+        var sortedItems = items.stream()
+                .sorted((a, b) -> Long.compare(a.productId(), b.productId()))
+                .toList();
+
+        for (var it : sortedItems) {
             inventoryService.reserveWithLock(it.productId(), it.qty(), null); // orderId는 아직 없으므로 null
         }
 
