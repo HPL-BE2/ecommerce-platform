@@ -8,6 +8,8 @@ import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.reflect.MethodSignature;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.expression.EvaluationContext;
 import org.springframework.expression.Expression;
 import org.springframework.expression.spel.standard.SpelExpressionParser;
@@ -32,9 +34,18 @@ import java.util.concurrent.TimeUnit;
  *     <li>락 획득 성공 시 비즈니스 로직 실행</li>
  *     <li>락 해제 (현재 스레드가 보유한 경우에만)</li>
  * </ol>
+ *
+ * <h3>Aspect 실행 순서</h3>
+ * <p>
+ * {@code @Order(Ordered.LOWEST_PRECEDENCE - 1)}로 설정하여
+ * {@code @Transactional}(LOWEST_PRECEDENCE)보다 먼저 실행됩니다.
+ * <br>
+ * 즉, 분산락 획득 → 트랜잭션 시작 → 비즈니스 로직 → 트랜잭션 커밋 → 락 해제 순서로 동작합니다.
+ * </p>
  */
 @Aspect
 @Component
+@Order(Ordered.LOWEST_PRECEDENCE - 1)  // @Transactional보다 먼저 실행
 @Slf4j
 @RequiredArgsConstructor
 public class DistributedLockAspect {
@@ -79,7 +90,14 @@ public class DistributedLockAspect {
             log.debug("[DistributedLock] 락 획득 성공: key={}", lockKey);
 
             // 3. 비즈니스 로직 수행
-            return joinPoint.proceed();
+            try {
+                return joinPoint.proceed();
+            } catch (Exception e) {
+                // 비즈니스 로직 실행 중 발생한 예외 로깅 (디버깅 편의성 향상)
+                log.error("[DistributedLock] 비즈니스 로직 실행 실패: key={}, method={}, errorType={}",
+                        lockKey, joinPoint.getSignature().getName(), e.getClass().getSimpleName(), e);
+                throw e;
+            }
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
