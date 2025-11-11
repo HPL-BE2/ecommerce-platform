@@ -4,6 +4,7 @@ import kr.hhplus.be.server.application.port.in.IssueCouponUseCase;
 import kr.hhplus.be.server.domain.model.Coupon;
 import kr.hhplus.be.server.domain.port.out.CouponReadWritePort;
 import kr.hhplus.be.server.infrastructure.lock.DistributedLock;
+import kr.hhplus.be.server.infrastructure.coupon.CouponRedisKeys;
 import kr.hhplus.be.server.infrastructure.persistence.adapter.CouponPersistenceAdapter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -52,7 +53,7 @@ public class CouponService implements IssueCouponUseCase {
 
         // 4) Redis Atomic Counter로 발급 수량 제한 확인 (성능 개선)
         if (coupon.hasIssuanceLimit()) {
-            String countKey = "coupon:" + cmd.couponId() + ":issued";
+            String countKey = CouponRedisKeys.issuedCount(cmd.couponId());
 
             // Redis Atomic Increment (분산 환경에서 원자적 증가)
             Long currentCount = counterRedisTemplate.opsForValue().increment(countKey);
@@ -94,7 +95,7 @@ public class CouponService implements IssueCouponUseCase {
             // UNIQUE 제약 위반 (동시 요청으로 인한 중복 발급 시도)
             // Redis 카운터 롤백 (예외 처리 강화)
             if (coupon.hasIssuanceLimit()) {
-                String countKey = "coupon:" + cmd.couponId() + ":issued";
+                String countKey = CouponRedisKeys.issuedCount(cmd.couponId());
                 try {
                     counterRedisTemplate.opsForValue().decrement(countKey);
                     log.debug("[CouponService] Redis 카운터 롤백 성공 (중복 발급): couponId={}, userId={}",

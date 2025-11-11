@@ -1,5 +1,7 @@
 package kr.hhplus.be.server.infrastructure.config;
 
+import kr.hhplus.be.server.infrastructure.coupon.CouponRedisKeys;
+import kr.hhplus.be.server.infrastructure.persistence.repo.SpringCouponIssuanceJpa;
 import kr.hhplus.be.server.infrastructure.persistence.repo.SpringCouponJpa;
 import kr.hhplus.be.server.infrastructure.persistence.repo.SpringInventoryJpa;
 import lombok.RequiredArgsConstructor;
@@ -25,6 +27,7 @@ import java.time.Duration;
 public class RedisCounterInitializer {
 
     private final SpringCouponJpa couponJpa;
+    private final SpringCouponIssuanceJpa couponIssuanceJpa;
     private final SpringInventoryJpa inventoryJpa;
     private final RedisTemplate<String, String> counterRedisTemplate;  // 카운터 전용
     private final RedisTemplate<String, Object> redisTemplate;  // 캐시용
@@ -50,11 +53,15 @@ public class RedisCounterInitializer {
         for (var coupon : coupons) {
             // 발급 제한이 있는 쿠폰만 초기화
             if (coupon.getMaxIssuance() != null && coupon.getMaxIssuance() > 0) {
-                String countKey = "coupon:" + coupon.getId() + ":issued";
-                Long issuedCount = Long.valueOf(coupon.getIssuedCount());
+                String issuedKey = CouponRedisKeys.issuedCount(coupon.getId());
+                String remainingKey = CouponRedisKeys.remainingCount(coupon.getId());
+                String userSetKey = CouponRedisKeys.issuedUsers(coupon.getId());
+                long issuedCount = coupon.getIssuedCount();
+                long remaining = Math.max(coupon.getMaxIssuance() - issuedCount, 0);
 
-                // Redis에 현재 발급 수량 저장 (String으로 저장하여 INCR/DECR 지원)
-                counterRedisTemplate.opsForValue().set(countKey, String.valueOf(issuedCount));
+                counterRedisTemplate.opsForValue().set(issuedKey, String.valueOf(issuedCount));
+                counterRedisTemplate.opsForValue().set(remainingKey, String.valueOf(remaining));
+                hydrateCouponUsers(userSetKey, coupon.getId());
 
                 log.debug("[RedisCounterInitializer] 쿠폰 카운터 초기화: couponId={}, issuedCount={}, maxIssuance={}",
                         coupon.getId(), issuedCount, coupon.getMaxIssuance());
@@ -88,5 +95,15 @@ public class RedisCounterInitializer {
         }
 
         log.info("[RedisCounterInitializer] 재고 캐시 초기화 완료: {}개 상품", initializedCount);
+    }
+
+    private void hydrateCouponUsers(String userSetKey, Long couponId) {
+        var userIds = couponIssuanceJpa.findIssuedUserIds(couponId);
+        if (userIds.isEmpty()) {
+            return;
+        }
+
+        String[] users = userIds.stream().map(String::valueOf).toArray(String[]::new);
+        counterRedisTemplate.opsForSet().add(userSetKey, users);
     }
 }

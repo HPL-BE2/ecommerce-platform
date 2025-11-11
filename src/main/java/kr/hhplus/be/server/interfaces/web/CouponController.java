@@ -1,6 +1,7 @@
 package kr.hhplus.be.server.interfaces.web;
 
 import kr.hhplus.be.server.application.port.in.IssueCouponUseCase;
+import kr.hhplus.be.server.application.port.in.RequestCouponIssueUseCase;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -10,6 +11,7 @@ import org.springframework.web.bind.annotation.*;
 @RequiredArgsConstructor
 public class CouponController {
     private final IssueCouponUseCase issueCouponUseCase;
+    private final RequestCouponIssueUseCase requestCouponIssueUseCase;
 
     /**
      * 쿠폰 발급 API
@@ -28,5 +30,14 @@ public class CouponController {
                 new IssueCouponUseCase.Command(couponId, userId)
         );
         return ResponseEntity.ok(result);
+    }
+
+    @PostMapping("/{couponId}/issue-async")
+    public ResponseEntity<RequestCouponIssueUseCase.Result> issueCouponAsync(
+            @PathVariable Long couponId,
+            @RequestParam Long userId
+    ) {
+        var result = requestCouponIssueUseCase.request(new RequestCouponIssueUseCase.Command(couponId, userId));
+        return ResponseEntity.accepted().body(result);
     }
 }
