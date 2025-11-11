@@ -90,7 +90,14 @@ public class DistributedLockAspect {
             log.debug("[DistributedLock] 락 획득 성공: key={}", lockKey);
 
             // 3. 비즈니스 로직 수행
-            return joinPoint.proceed();
+            try {
+                return joinPoint.proceed();
+            } catch (Exception e) {
+                // 비즈니스 로직 실행 중 발생한 예외 로깅 (디버깅 편의성 향상)
+                log.error("[DistributedLock] 비즈니스 로직 실행 실패: key={}, method={}, errorType={}",
+                        lockKey, joinPoint.getSignature().getName(), e.getClass().getSimpleName(), e);
+                throw e;
+            }
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
