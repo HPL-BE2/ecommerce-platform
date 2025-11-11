@@ -58,6 +58,39 @@
 4. `CouponIssueMessageListener`는 메시지를 소비하여 `CouponReadWritePort.issueCoupon` 호출 후 `coupon:{id}:issued` 카운터를 증가.
 5. 동시성 이슈(UNIQUE 제약 위반)는 listener에서 로그로 남기고 재시도 전략 추가 시 확장 가능.
 
+### 장애 시 슬롯 복원 비교
+
+| 시나리오 | 기존 프로세스 | 개선안 프로세스 |
+| --- | --- | --- |
+| **예약 단계** | Lua 스크립트가 `remaining`을 `DECR`하고 `coupon:{id}:users`에 사용자 추가. | 동일하게 Lua 스크립트가 슬롯을 선점하고 사용자 집합에 추가. |
+| **메시지 처리** | `CouponIssueMessageListener.handle`가 RDB 발급(`couponPort.issueCoupon`) 시도. 예외 발생 시 즉시 전파되어 `@Async` 리스너가 종료됨. | 발급 시도 후 예외 발생 시 `catch` 블록에서 Redis 트랜잭션으로 `remaining`을 `INCR`하고 사용자 집합에서 제거, 이후 보상 메시지(예: 재처리 큐) 발행. |
+| **후속 동작** | 남은 재고가 줄어든 상태로 고정되며, 사용자 Set에 남아 재시도 불가 → 쿠폰 누수. | 슬롯이 원복되어 다른 사용자 또는 동일 사용자가 재시도 가능, 실패 건은 DLQ/재시도 큐에서 별도 추적. |
+
+```mermaid
+flowchart TB
+    subgraph Current[현재 플로우]
+        C1[Lua: remaining--, user SADD]
+        C2[Listener: issueCoupon()]
+        C3{DB 발급 실패?}
+        C4[예외 전파 후 종료]
+        C5[슬롯/사용자 잔류]
+        C1 --> C2 --> C3
+        C3 -- 예 --> C4 --> C5
+        C3 -- 아니오 --> C6[발급 성공]
+    end
+
+    subgraph Improved[개선 플로우]
+        I1[Lua: remaining--, user SADD]
+        I2[Listener: issueCoupon()]
+        I3{DB 발급 실패?}
+        I4[Redis 보상: remaining++, user 제거]
+        I5[재처리 큐/알림]
+        I1 --> I2 --> I3
+        I3 -- 예 --> I4 --> I5
+        I3 -- 아니오 --> I6[발급 성공]
+    end
+```
+
 ### 운영 고려사항
 - `RedisCounterInitializer`가 RDB와 Redis 상태를 동기화하므로 재배포 시에도 일관성 유지.
 - 향후 Dead Letter Queue, 재시도 백오프, TTL 종료 후 정리 배치를 붙이도록 확장 포인트 확보.
