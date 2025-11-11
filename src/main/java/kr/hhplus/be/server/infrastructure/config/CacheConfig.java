@@ -91,15 +91,22 @@ public class CacheConfig {
 
     /**
      * Redisson Client for distributed locks
+     * <p>
+     * Connection Pool 설정:
+     * - ConnectionPoolSize: 20 (DB 커넥션 풀의 약 5~10배 권장)
+     * - MinimumIdleSize: 5 (유휴 커넥션 최소 유지)
+     * <p>
+     * Redisson은 Netty 기반 비동기 처리이지만, 과도한 풀 크기는 오히려
+     * Redis 서버 부하와 메모리 사용량을 증가시킵니다.
+     * </p>
      */
     @Bean
     public RedissonClient redissonClient() {
         Config config = new Config();
         config.useSingleServer()
                 .setAddress("redis://" + redisHost + ":" + redisPort)
-                .setConnectionPoolSize(50)
-                .setConnectionMinimumIdleSize(10)
-                .setIdleConnectionTimeout(10000)
+                .setConnectionPoolSize(20)          // 50 → 20 (DB 커넥션 풀 대비 적정 수준)
+                .setConnectionMinimumIdleSize(5)     // 10 → 5 (최소 유휴 커넥션 감소)
                 .setConnectTimeout(3000)
                 .setTimeout(3000)
                 .setRetryAttempts(3)
