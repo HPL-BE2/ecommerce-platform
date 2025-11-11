@@ -12,6 +12,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
@@ -58,6 +59,9 @@ class ConcurrencyControlIntegrationTest extends ControllerIntegrationTestSupport
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private RedisTemplate<String, Object> redisTemplate;
 
     private Long testUserId;
     private Long testProductId;
@@ -238,11 +242,17 @@ class ConcurrencyControlIntegrationTest extends ControllerIntegrationTestSupport
 
         // Then: 정확히 10명만 발급
         long issuedCount = couponIssuanceJpa.countByCouponId(couponId);
-        System.out.println("=== 쿠폰 발급 동시성 테스트 결과 ===");
+
+        // Redis 카운터도 확인 (분산락 + Redis Atomic Counter 검증)
+        String redisCountKey = "coupon:" + couponId + ":issued";
+        Integer redisCount = (Integer) redisTemplate.opsForValue().get(redisCountKey);
+
+        System.out.println("=== 쿠폰 발급 동시성 테스트 결과 (분산락 + Redis Atomic Counter) ===");
         System.out.println("완료 여부: " + finished);
         System.out.println("성공: " + successCount.get() + "건");
         System.out.println("실패: " + failCount.get() + "건");
-        System.out.println("최종 발급 수: " + issuedCount + "건");
+        System.out.println("DB 발급 수: " + issuedCount + "건");
+        System.out.println("Redis 카운터: " + redisCount + "건");
         if (!exceptions.isEmpty()) {
             System.out.println("예외 발생: " + exceptions.size() + "건");
             exceptions.forEach(e -> System.out.println("  - " + e.getClass().getSimpleName() + ": " + e.getMessage()));
@@ -251,6 +261,9 @@ class ConcurrencyControlIntegrationTest extends ControllerIntegrationTestSupport
         assertThat(successCount.get()).isEqualTo(10);
         assertThat(failCount.get()).isEqualTo(40);
         assertThat(issuedCount).isEqualTo(10L);
+
+        // Redis 카운터도 DB와 일치해야 함 (동기화 검증)
+        assertThat(redisCount).isEqualTo(10);
     }
 
     // === Helper Methods ===
