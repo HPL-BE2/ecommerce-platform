@@ -1,6 +1,7 @@
 package kr.hhplus.be.server.infrastructure.persistence.adapter;
 
 import kr.hhplus.be.server.domain.model.Product;
+import kr.hhplus.be.server.domain.port.out.ProductBulkReadPort;
 import kr.hhplus.be.server.domain.port.out.ProductDetailReadPort;
 import kr.hhplus.be.server.domain.port.out.ProductReadPort;
 import kr.hhplus.be.server.infrastructure.persistence.entity.InventoryEntity;
@@ -11,12 +12,16 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Component
 @RequiredArgsConstructor
-public class ProductReadAdapter implements ProductReadPort, ProductDetailReadPort {
+public class ProductReadAdapter implements ProductReadPort, ProductDetailReadPort, ProductBulkReadPort {
     private final SpringProductJpa productJpa;
     private final SpringInventoryJpa inventoryJpa;
 
@@ -50,5 +55,31 @@ public class ProductReadAdapter implements ProductReadPort, ProductDetailReadPor
                     entity.getThumbnailUrl()
             );
         });
+    }
+
+    @Override
+    public Map<Long, Product> findByIds(Collection<Long> productIds) {
+        if (productIds == null || productIds.isEmpty()) {
+            return Map.of();
+        }
+
+        var ids = productIds.stream().distinct().toList();
+        var inventoryByProductId = inventoryJpa.findAllById(ids).stream()
+                .collect(Collectors.toMap(InventoryEntity::getProductId, Function.identity()));
+
+        return productJpa.findAllById(ids).stream()
+                .map(entity -> {
+                    var inv = inventoryByProductId.get(entity.getId());
+                    int stock = inv != null ? inv.getStock() : 0;
+                    return new Product(
+                            entity.getId(),
+                            entity.getSku(),
+                            entity.getName(),
+                            entity.getPrice() != null ? entity.getPrice() : BigDecimal.ZERO,
+                            stock,
+                            entity.getThumbnailUrl()
+                    );
+                })
+                .collect(Collectors.toMap(Product::id, Function.identity()));
     }
 }

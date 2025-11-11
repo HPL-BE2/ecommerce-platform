@@ -1,6 +1,7 @@
 package kr.hhplus.be.server.interfaces.web;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import kr.hhplus.be.server.application.port.in.CompleteOrderUseCase;
 import kr.hhplus.be.server.application.port.in.CreateOrderUseCase;
 import kr.hhplus.be.server.interfaces.web.dto.OrderDtos;
 import org.junit.jupiter.api.Test;
@@ -33,6 +34,9 @@ class OrderControllerTest {
 
     @MockitoBean
     CreateOrderUseCase createOrderUseCase;
+
+    @MockitoBean
+    CompleteOrderUseCase completeOrderUseCase;
 
     @Test
     void create_returnsCreatedOrderEnvelope() throws Exception {
