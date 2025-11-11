@@ -8,6 +8,7 @@ import kr.hhplus.be.server.infrastructure.persistence.adapter.CouponPersistenceA
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -61,8 +62,21 @@ public class CouponService implements IssueCouponUseCase {
 
             // 최대 발급량 초과 체크
             if (currentCount > coupon.maxIssuance()) {
-                // 초과된 카운트 롤백
-                counterRedisTemplate.opsForValue().decrement(countKey);
+                // 초과된 카운트 롤백 (예외 처리 강화)
+                try {
+                    counterRedisTemplate.opsForValue().decrement(countKey);
+                    log.debug("[CouponService] Redis 카운터 롤백 성공: couponId={}, countKey={}",
+                            cmd.couponId(), countKey);
+                } catch (RedisConnectionFailureException e) {
+                    // 롤백 실패 시 로그 + 알림 (추후 배치 동기화)
+                    log.error("[CouponService] Redis 카운터 롤백 실패 (네트워크 장애): couponId={}, countKey={}, " +
+                            "조치: 배치 동기화 필요", cmd.couponId(), countKey, e);
+                    // TODO: 알림 발송 or 동기화 큐 적재
+                } catch (Exception e) {
+                    log.error("[CouponService] Redis 카운터 롤백 실패 (예상치 못한 오류): couponId={}, countKey={}",
+                            cmd.couponId(), countKey, e);
+                }
+
                 log.warn("[CouponService] 쿠폰 소진: couponId={}, attemptedCount={}, maxIssuance={}",
                         cmd.couponId(), currentCount, coupon.maxIssuance());
                 throw new IllegalStateException("쿠폰이 모두 소진되었습니다: couponId=" + cmd.couponId());
@@ -78,10 +92,23 @@ public class CouponService implements IssueCouponUseCase {
 
         } catch (DataIntegrityViolationException e) {
             // UNIQUE 제약 위반 (동시 요청으로 인한 중복 발급 시도)
-            // Redis 카운터 롤백
+            // Redis 카운터 롤백 (예외 처리 강화)
             if (coupon.hasIssuanceLimit()) {
                 String countKey = "coupon:" + cmd.couponId() + ":issued";
-                counterRedisTemplate.opsForValue().decrement(countKey);
+                try {
+                    counterRedisTemplate.opsForValue().decrement(countKey);
+                    log.debug("[CouponService] Redis 카운터 롤백 성공 (중복 발급): couponId={}, userId={}",
+                            cmd.couponId(), cmd.userId());
+                } catch (RedisConnectionFailureException rollbackEx) {
+                    // 롤백 실패 시 로그 + 알림 (추후 배치 동기화)
+                    log.error("[CouponService] Redis 카운터 롤백 실패 (네트워크 장애): couponId={}, userId={}, " +
+                            "조치: 배치 동기화 필요", cmd.couponId(), cmd.userId(), rollbackEx);
+                    // TODO: 알림 발송 or 동기화 큐 적재
+                } catch (Exception rollbackEx) {
+                    log.error("[CouponService] Redis 카운터 롤백 실패 (예상치 못한 오류): couponId={}, userId={}",
+                            cmd.couponId(), cmd.userId(), rollbackEx);
+                }
+
                 log.warn("[CouponService] 중복 발급 시도로 인한 롤백: couponId={}, userId={}",
                         cmd.couponId(), cmd.userId());
             }
