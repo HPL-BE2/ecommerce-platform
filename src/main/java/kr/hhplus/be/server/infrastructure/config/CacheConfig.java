@@ -59,7 +59,7 @@ public class CacheConfig {
     }
 
     /**
-     * RedisTemplate for manual Redis operations (e.g., atomic counters)
+     * RedisTemplate for manual Redis operations (e.g., caching objects)
      */
     @Bean
     public RedisTemplate<String, Object> redisTemplate(LettuceConnectionFactory connectionFactory) {
@@ -69,6 +69,23 @@ public class CacheConfig {
         template.setValueSerializer(new GenericJackson2JsonRedisSerializer());
         template.setHashKeySerializer(new StringRedisSerializer());
         template.setHashValueSerializer(new GenericJackson2JsonRedisSerializer());
+        return template;
+    }
+
+    /**
+     * RedisTemplate for atomic counters (INCR/DECR operations)
+     * <p>
+     * Uses StringRedisSerializer for both key and value to support Redis atomic operations.
+     * GenericJackson2JsonRedisSerializer would store numbers as JSON objects,
+     * which prevents INCR/DECR commands from working.
+     * </p>
+     */
+    @Bean
+    public RedisTemplate<String, String> counterRedisTemplate(LettuceConnectionFactory connectionFactory) {
+        RedisTemplate<String, String> template = new RedisTemplate<>();
+        template.setConnectionFactory(connectionFactory);
+        template.setKeySerializer(new StringRedisSerializer());
+        template.setValueSerializer(new StringRedisSerializer());  // String으로 숫자 저장
         return template;
     }
 

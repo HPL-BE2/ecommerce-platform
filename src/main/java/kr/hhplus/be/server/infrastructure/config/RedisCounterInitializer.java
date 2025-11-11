@@ -26,7 +26,8 @@ public class RedisCounterInitializer {
 
     private final SpringCouponJpa couponJpa;
     private final SpringInventoryJpa inventoryJpa;
-    private final RedisTemplate<String, Object> redisTemplate;
+    private final RedisTemplate<String, String> counterRedisTemplate;  // 카운터 전용
+    private final RedisTemplate<String, Object> redisTemplate;  // 캐시용
 
     /**
      * 애플리케이션 준비 완료 후 Redis 초기화
@@ -52,8 +53,8 @@ public class RedisCounterInitializer {
                 String countKey = "coupon:" + coupon.getId() + ":issued";
                 Long issuedCount = Long.valueOf(coupon.getIssuedCount());
 
-                // Redis에 현재 발급 수량 저장
-                redisTemplate.opsForValue().set(countKey, issuedCount);
+                // Redis에 현재 발급 수량 저장 (String으로 저장하여 INCR/DECR 지원)
+                counterRedisTemplate.opsForValue().set(countKey, String.valueOf(issuedCount));
 
                 log.debug("[RedisCounterInitializer] 쿠폰 카운터 초기화: couponId={}, issuedCount={}, maxIssuance={}",
                         coupon.getId(), issuedCount, coupon.getMaxIssuance());

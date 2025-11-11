@@ -20,7 +20,7 @@ import java.time.OffsetDateTime;
 public class CouponService implements IssueCouponUseCase {
     private final CouponReadWritePort couponPort;
     private final CouponPersistenceAdapter couponAdapter;
-    private final RedisTemplate<String, Object> redisTemplate;
+    private final RedisTemplate<String, String> counterRedisTemplate;  // 카운터 전용 (INCR/DECR)
 
     @Override
     @DistributedLock(
@@ -54,7 +54,7 @@ public class CouponService implements IssueCouponUseCase {
             String countKey = "coupon:" + cmd.couponId() + ":issued";
 
             // Redis Atomic Increment (분산 환경에서 원자적 증가)
-            Long currentCount = redisTemplate.opsForValue().increment(countKey);
+            Long currentCount = counterRedisTemplate.opsForValue().increment(countKey);
 
             log.debug("[CouponService] 쿠폰 발급 시도: couponId={}, currentCount={}, maxIssuance={}",
                     cmd.couponId(), currentCount, coupon.maxIssuance());
@@ -62,7 +62,7 @@ public class CouponService implements IssueCouponUseCase {
             // 최대 발급량 초과 체크
             if (currentCount > coupon.maxIssuance()) {
                 // 초과된 카운트 롤백
-                redisTemplate.opsForValue().decrement(countKey);
+                counterRedisTemplate.opsForValue().decrement(countKey);
                 log.warn("[CouponService] 쿠폰 소진: couponId={}, attemptedCount={}, maxIssuance={}",
                         cmd.couponId(), currentCount, coupon.maxIssuance());
                 throw new IllegalStateException("쿠폰이 모두 소진되었습니다: couponId=" + cmd.couponId());
@@ -81,7 +81,7 @@ public class CouponService implements IssueCouponUseCase {
             // Redis 카운터 롤백
             if (coupon.hasIssuanceLimit()) {
                 String countKey = "coupon:" + cmd.couponId() + ":issued";
-                redisTemplate.opsForValue().decrement(countKey);
+                counterRedisTemplate.opsForValue().decrement(countKey);
                 log.warn("[CouponService] 중복 발급 시도로 인한 롤백: couponId={}, userId={}",
                         cmd.couponId(), cmd.userId());
             }
