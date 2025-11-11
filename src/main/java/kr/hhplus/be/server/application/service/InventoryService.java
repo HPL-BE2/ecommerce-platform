@@ -8,6 +8,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.Duration;
 import java.util.List;
@@ -77,6 +79,7 @@ public class InventoryService {
             waitTime = 2000,
             failMessage = "상품 재고 예약 요청이 집중되어 처리할 수 없습니다. 잠시 후 다시 시도해주세요."
     )
+    @Transactional
     public void reserveWithLock(Long productId, int quantity, Long orderId) {
         // 1) Redis 캐시 재고 확인 (빠른 실패)
         String stockKey = "product:" + productId + ":stock";
@@ -99,10 +102,24 @@ public class InventoryService {
             throw e;
         }
 
-        // 3) Redis 캐시 재고 동기화
+        // 3) Redis 캐시 재고 동기화 (트랜잭션 커밋 후 실행)
         if (cachedStock != null) {
-            Long newStock = redisTemplate.opsForValue().decrement(stockKey, quantity);
-            log.debug("[InventoryService] 재고 캐시 동기화: productId={}, newStock={}", productId, newStock);
+            TransactionSynchronizationManager.registerSynchronization(
+                new TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                        try {
+                            Long newStock = redisTemplate.opsForValue().decrement(stockKey, quantity);
+                            log.debug("[InventoryService] 재고 캐시 동기화 (트랜잭션 커밋 후): productId={}, newStock={}",
+                                    productId, newStock);
+                        } catch (Exception e) {
+                            // 캐시 갱신 실패는 치명적이지 않음 (TTL로 자동 동기화)
+                            log.warn("[InventoryService] 재고 캐시 갱신 실패 (TTL로 복구 예정): productId={}",
+                                    productId, e);
+                        }
+                    }
+                }
+            );
         }
     }
 
