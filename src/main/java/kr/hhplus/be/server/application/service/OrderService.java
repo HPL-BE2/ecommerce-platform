@@ -3,16 +3,16 @@ package kr.hhplus.be.server.application.service;
 import kr.hhplus.be.server.application.port.in.CompleteOrderUseCase;
 import kr.hhplus.be.server.application.port.in.CreateOrderUseCase;
 import kr.hhplus.be.server.application.port.in.CreateWalletDebitUseCase;
+import kr.hhplus.be.server.domain.event.OrderCompletedDomainEvent;
 import kr.hhplus.be.server.domain.model.OrderModels;
 import kr.hhplus.be.server.domain.port.out.CouponValidatePort;
 import kr.hhplus.be.server.domain.port.out.InventoryReservePort;
-import kr.hhplus.be.server.domain.port.out.OrderEventPublisher;
 import kr.hhplus.be.server.domain.port.out.OrderWritePort;
 import kr.hhplus.be.server.domain.port.out.ProductPricePort;
-import kr.hhplus.be.server.domain.port.out.dto.OrderCompletedEvent;
 import kr.hhplus.be.server.interfaces.web.error.ApiException;
 import kr.hhplus.be.server.interfaces.web.error.NotFoundException;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,7 +32,7 @@ public class OrderService implements CreateOrderUseCase, CompleteOrderUseCase {
     private final InventoryReservePort invPort;
     private final CouponValidatePort couponPort;
     private final OrderWritePort orderWritePort;
-    private final OrderEventPublisher orderEventPublisher;
+    private final ApplicationEventPublisher eventPublisher;
     private final WalletService walletService;
     private final InventoryService inventoryService;
 
@@ -144,9 +144,15 @@ public class OrderService implements CreateOrderUseCase, CompleteOrderUseCase {
             throw new IllegalArgumentException("orderId는 필수입니다.");
         }
 
+        // 핵심 비즈니스: 주문 상태 업데이트
         OrderModels.OrderSummary summary = orderWritePort.markOrderCompleted(command.orderId());
 
-        var event = new OrderCompletedEvent(
+        // Spring Application Event 발행 (메모리 내, 트랜잭션 영향 없음)
+        // 여러 리스너가 독립적으로 처리:
+        // - OrderDataPlatformEventHandler: 데이터 플랫폼 전송
+        // - OrderRankingEventHandler: 상품 랭킹 업데이트
+        // - OrderInventoryAnalyticsHandler: 재고 분석
+        var event = new OrderCompletedDomainEvent(
                 summary.orderId(),
                 summary.userId(),
                 summary.subtotal(),
@@ -155,7 +161,7 @@ public class OrderService implements CreateOrderUseCase, CompleteOrderUseCase {
                 summary.requestKey(),
                 summary.completedAt(),
                 summary.items().stream()
-                        .map(it -> new OrderCompletedEvent.Item(
+                        .map(it -> new OrderCompletedDomainEvent.OrderItemSnapshot(
                                 it.productId(),
                                 it.name(),
                                 it.unitPrice(),
@@ -165,7 +171,7 @@ public class OrderService implements CreateOrderUseCase, CompleteOrderUseCase {
                         .toList()
         );
 
-        orderEventPublisher.publish(event);
+        eventPublisher.publishEvent(event);
 
         return new CompleteOrderUseCase.Result(summary.orderId(), summary.total());
     }
