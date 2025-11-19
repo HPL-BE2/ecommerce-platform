@@ -38,4 +38,12 @@ public interface CouponReadWritePort {
      * @return 이미 발급받았으면 true
      */
     boolean isAlreadyIssued(Long couponId, Long userId);
+
+    /**
+     * 쿠폰 발급 취소 (보상 트랜잭션)
+     * @param couponId 쿠폰 ID
+     * @param userId 사용자 ID
+     * @return 삭제 성공 여부
+     */
+    boolean deleteCouponIssuance(Long couponId, Long userId);
 }

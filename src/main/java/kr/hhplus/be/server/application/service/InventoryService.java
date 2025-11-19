@@ -1,5 +1,6 @@
 package kr.hhplus.be.server.application.service;
 
+import kr.hhplus.be.server.application.port.in.ReleaseInventoryUseCase;
 import kr.hhplus.be.server.domain.model.OrderModels;
 import kr.hhplus.be.server.domain.port.out.InventoryReservePort;
 import kr.hhplus.be.server.infrastructure.lock.DistributedLock;
@@ -23,7 +24,7 @@ import java.util.List;
 @Service
 @RequiredArgsConstructor
 @Slf4j
-public class InventoryService {
+public class InventoryService implements ReleaseInventoryUseCase {
 
     private final InventoryReservePort inventoryPort;
     private final RedisTemplate<String, Object> redisTemplate;
@@ -156,5 +157,54 @@ public class InventoryService {
         String stockKey = "product:" + productId + ":stock";
         redisTemplate.opsForValue().set(stockKey, stock, Duration.ofSeconds(30));
         log.debug("[InventoryService] 재고 캐시 초기화: productId={}, stock={}", productId, stock);
+    }
+
+    /**
+     * 재고 해제 (보상 트랜잭션)
+     *
+     * Saga 패턴에서 주문 생성 실패 시 이미 예약된 재고를 복원
+     * 1. DB 재고 복원
+     * 2. Redis 캐시 재고 증가
+     */
+    @Override
+    @Transactional
+    public ReleaseInventoryUseCase.Result release(ReleaseInventoryUseCase.Command cmd) {
+        if (cmd.items() == null || cmd.items().isEmpty()) {
+            throw new IllegalArgumentException("items는 필수입니다.");
+        }
+
+        log.info("[InventoryService] 재고 해제 시작: items={}, reason={}", cmd.items().size(), cmd.reason());
+
+        int releasedCount = 0;
+
+        for (var item : cmd.items()) {
+            try {
+                // TODO: DB 재고 복원 로직 구현 필요
+                // inventoryPort.restore(item.productId(), item.quantity());
+
+                // Redis 캐시 복원
+                String stockKey = "product:" + item.productId() + ":stock";
+                Long newStock = redisTemplate.opsForValue().increment(stockKey, item.quantity());
+
+                log.info("[InventoryService] 재고 해제: productId={}, quantity={}, newStock={}",
+                        item.productId(), item.quantity(), newStock);
+
+                releasedCount++;
+
+            } catch (Exception e) {
+                log.error("[InventoryService] 재고 해제 실패: productId={}, quantity={}, error={}",
+                        item.productId(), item.quantity(), e.getMessage(), e);
+            }
+        }
+
+        if (releasedCount == 0) {
+            return new ReleaseInventoryUseCase.Result(false, "재고 해제 실패", 0);
+        }
+
+        return new ReleaseInventoryUseCase.Result(
+                true,
+                releasedCount + "개 상품의 재고가 해제되었습니다.",
+                releasedCount
+        );
     }
 }
