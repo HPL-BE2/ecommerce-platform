@@ -9,9 +9,16 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Async;
-import org.springframework.stereotype.Component;
 
-@Component
+/**
+ * [DEPRECATED] OrderRankingEventHandler로 대체됨
+ *
+ * 기존: Outbox → OutboundMessagePublishedEvent → Ranking 업데이트
+ * 개선: OrderCompletedDomainEvent → OrderRankingEventHandler → Ranking 업데이트
+ *
+ * 트랜잭션 커밋 직후 즉시 처리하므로 더 빠르고, 중복 처리 방지
+ */
+// @Component  // ← 비활성화: 중복 처리 방지
 @RequiredArgsConstructor
 @Slf4j
 public class OrderCompletedRankingListener {

@@ -1,6 +1,7 @@
 package kr.hhplus.be.server.application.service;
 
 import kr.hhplus.be.server.application.port.in.IssueCouponUseCase;
+import kr.hhplus.be.server.application.port.in.ReleaseCouponUseCase;
 import kr.hhplus.be.server.domain.model.Coupon;
 import kr.hhplus.be.server.domain.port.out.CouponReadWritePort;
 import kr.hhplus.be.server.infrastructure.lock.DistributedLock;
@@ -19,7 +20,7 @@ import java.time.OffsetDateTime;
 @Service
 @RequiredArgsConstructor
 @Slf4j
-public class CouponService implements IssueCouponUseCase {
+public class CouponService implements IssueCouponUseCase, ReleaseCouponUseCase {
     private final CouponReadWritePort couponPort;
     private final CouponPersistenceAdapter couponAdapter;
     private final RedisTemplate<String, String> counterRedisTemplate;  // 카운터 전용 (INCR/DECR)
@@ -117,5 +118,63 @@ public class CouponService implements IssueCouponUseCase {
         }
 
         return new Result(issuanceId, cmd.couponId(), cmd.userId(), "쿠폰이 발급되었습니다.");
+    }
+
+    /**
+     * 쿠폰 해제 (보상 트랜잭션)
+     *
+     * Saga 패턴에서 주문 생성 실패 시 이미 발급된 쿠폰을 취소
+     * 1. DB에서 쿠폰 발급 기록 삭제
+     * 2. Redis 카운터 감소
+     */
+    @Override
+    @Transactional
+    public ReleaseCouponUseCase.Result release(ReleaseCouponUseCase.Command cmd) {
+        if (cmd.couponId() == null || cmd.userId() == null) {
+            throw new IllegalArgumentException("couponId와 userId는 필수입니다.");
+        }
+
+        log.info("[CouponService] 쿠폰 해제 시작: couponId={}, userId={}, reason={}",
+                cmd.couponId(), cmd.userId(), cmd.reason());
+
+        try {
+            // 1. 쿠폰 조회
+            Coupon coupon = couponPort.findById(cmd.couponId())
+                    .orElseThrow(() -> new IllegalArgumentException("쿠폰을 찾을 수 없습니다: couponId=" + cmd.couponId()));
+
+            // 2. 발급 기록 삭제
+            boolean deleted = couponPort.deleteCouponIssuance(cmd.couponId(), cmd.userId());
+
+            if (!deleted) {
+                log.warn("[CouponService] 쿠폰 발급 기록이 없음: couponId={}, userId={}",
+                        cmd.couponId(), cmd.userId());
+                return new ReleaseCouponUseCase.Result(false, "쿠폰 발급 기록이 없습니다.");
+            }
+
+            // 3. Redis 카운터 감소 (발급 수량 제한이 있는 경우)
+            if (coupon.hasIssuanceLimit()) {
+                String countKey = CouponRedisKeys.issuedCount(cmd.couponId());
+                try {
+                    Long currentCount = counterRedisTemplate.opsForValue().decrement(countKey);
+                    log.debug("[CouponService] Redis 카운터 감소 성공: couponId={}, currentCount={}",
+                            cmd.couponId(), currentCount);
+                } catch (RedisConnectionFailureException e) {
+                    log.error("[CouponService] Redis 카운터 감소 실패 (네트워크 장애): couponId={}, " +
+                            "조치: 배치 동기화 필요", cmd.couponId(), e);
+                    // Redis 실패해도 DB는 이미 삭제되었으므로 성공으로 간주
+                } catch (Exception e) {
+                    log.error("[CouponService] Redis 카운터 감소 실패 (예상치 못한 오류): couponId={}",
+                            cmd.couponId(), e);
+                }
+            }
+
+            log.info("[CouponService] 쿠폰 해제 완료: couponId={}, userId={}", cmd.couponId(), cmd.userId());
+            return new ReleaseCouponUseCase.Result(true, "쿠폰이 해제되었습니다.");
+
+        } catch (Exception e) {
+            log.error("[CouponService] 쿠폰 해제 실패: couponId={}, userId={}, error={}",
+                    cmd.couponId(), cmd.userId(), e.getMessage(), e);
+            return new ReleaseCouponUseCase.Result(false, "쿠폰 해제 실패: " + e.getMessage());
+        }
     }
 }

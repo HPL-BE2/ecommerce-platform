@@ -71,6 +71,17 @@ public class CouponPersistenceAdapter implements CouponReadWritePort {
         return issuanceJpa.findByCouponIdAndUserId(couponId, userId).isPresent();
     }
 
+    @Override
+    public boolean deleteCouponIssuance(Long couponId, Long userId) {
+        var issuance = issuanceJpa.findByCouponIdAndUserId(couponId, userId);
+        if (issuance.isEmpty()) {
+            return false;
+        }
+
+        issuanceJpa.delete(issuance.get());
+        return true;
+    }
+
     private Coupon toDomain(CouponEntity e) {
         return new Coupon(
                 e.getId(),
