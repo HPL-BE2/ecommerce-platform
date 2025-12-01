@@ -54,6 +54,9 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-data-redis")
     implementation("org.redisson:redisson-spring-boot-starter:3.25.0")
 
+    // Kafka
+    implementation("org.springframework.kafka:spring-kafka")
+
     // Jackson
     implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310")
 
