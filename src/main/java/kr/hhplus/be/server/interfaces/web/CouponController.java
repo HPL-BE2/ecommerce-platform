@@ -32,6 +32,19 @@ public class CouponController {
         return ResponseEntity.ok(result);
     }
 
+    /**
+     * 쿠폰 발급 API (Kafka 비동기)
+     * POST /coupons/{couponId}/issue-async
+     *
+     * Kafka 기반 비동기 처리:
+     * 1. Lua Script로 Redis 검증
+     * 2. Kafka로 발급 요청 발행
+     * 3. 즉시 응답 202 Accepted
+     *
+     * @param couponId 쿠폰 ID
+     * @param userId 사용자 ID
+     * @return 발급 요청 접수 결과
+     */
     @PostMapping("/{couponId}/issue-async")
     public ResponseEntity<RequestCouponIssueUseCase.Result> issueCouponAsync(
             @PathVariable Long couponId,

@@ -32,4 +32,40 @@ public class KafkaConfig {
                 .config("min.insync.replicas", "2")   // 최소 복제본 수
                 .build();
     }
+
+    /**
+     * 쿠폰 발급 요청 Topic 자동 생성
+     *
+     * Topic: coupon.issue.requests
+     * Partitions: 10 (높은 처리량)
+     * Replication Factor: 2
+     * Retention: 1일
+     */
+    @Bean
+    public NewTopic couponIssueRequestsTopic() {
+        return TopicBuilder.name("coupon.issue.requests")
+                .partitions(10)
+                .replicas(2)
+                .config("retention.ms", "86400000")   // 1일
+                .config("min.insync.replicas", "2")
+                .build();
+    }
+
+    /**
+     * 쿠폰 발급 결과 Topic 자동 생성
+     *
+     * Topic: coupon.issue.results
+     * Partitions: 5
+     * Replication Factor: 2
+     * Retention: 3일
+     */
+    @Bean
+    public NewTopic couponIssueResultsTopic() {
+        return TopicBuilder.name("coupon.issue.results")
+                .partitions(5)
+                .replicas(2)
+                .config("retention.ms", "259200000")  // 3일
+                .config("min.insync.replicas", "2")
+                .build();
+    }
 }
