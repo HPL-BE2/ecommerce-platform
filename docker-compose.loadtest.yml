@@ -1,0 +1,270 @@
+# Docker Compose for Load Testing
+# 다양한 리소스 프로파일로 성능 측정
+#
+# 사용법:
+# docker-compose -f docker-compose.loadtest.yml --profile minimal up -d
+# docker-compose -f docker-compose.loadtest.yml --profile baseline up -d
+# docker-compose -f docker-compose.loadtest.yml --profile standard up -d
+# docker-compose -f docker-compose.loadtest.yml --profile peak up -d
+
+version: '3.8'
+
+services:
+  # MySQL (공통)
+  mysql:
+    image: mysql:8.0
+    container_name: ecommerce-mysql-loadtest
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: ecommerce
+      MYSQL_USER: user
+      MYSQL_PASSWORD: password
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./src/main/resources/schema.sql:/docker-entrypoint-initdb.d/1-schema.sql
+      - ./src/main/resources/data.sql:/docker-entrypoint-initdb.d/2-data.sql
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --max_connections=500
+      --innodb_buffer_pool_size=1G
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+
+  # Redis (공통)
+  redis:
+    image: redis:7.0-alpine
+    container_name: ecommerce-redis-loadtest
+    ports:
+      - "6379:6379"
+    command: redis-server --maxmemory 2gb --maxmemory-policy allkeys-lru
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+
+  # Kafka Zookeeper
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    container_name: ecommerce-zookeeper-loadtest
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  # Kafka Broker
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: ecommerce-kafka-loadtest
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+
+  # ================================================
+  # Application Server - Profile: minimal (최소 스펙)
+  # ================================================
+  app-minimal:
+    build: .
+    container_name: ecommerce-app-minimal
+    profiles: ["minimal"]
+    depends_on:
+      - mysql
+      - redis
+      - kafka
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/ecommerce
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      # JVM 설정
+      JAVA_OPTS: >
+        -Xms512m
+        -Xmx512m
+        -XX:MaxMetaspaceSize=256m
+        -XX:+UseG1GC
+        -XX:MaxGCPauseMillis=200
+    deploy:
+      resources:
+        limits:
+          cpus: '1'          # 1 Core
+          memory: 1G         # 1GB
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # ================================================
+  # Application Server - Profile: baseline (권장 최소)
+  # ================================================
+  app-baseline:
+    build: .
+    container_name: ecommerce-app-baseline
+    profiles: ["baseline"]
+    depends_on:
+      - mysql
+      - redis
+      - kafka
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/ecommerce
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      JAVA_OPTS: >
+        -Xms1g
+        -Xmx1g
+        -XX:MaxMetaspaceSize=256m
+        -XX:+UseG1GC
+        -XX:MaxGCPauseMillis=200
+    deploy:
+      resources:
+        limits:
+          cpus: '2'          # 2 Cores
+          memory: 2G         # 2GB
+        reservations:
+          cpus: '1'
+          memory: 1G
+
+  # ================================================
+  # Application Server - Profile: standard (권장 스펙)
+  # ================================================
+  app-standard:
+    build: .
+    container_name: ecommerce-app-standard
+    profiles: ["standard"]
+    depends_on:
+      - mysql
+      - redis
+      - kafka
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/ecommerce
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      JAVA_OPTS: >
+        -Xms2g
+        -Xmx2g
+        -XX:MaxMetaspaceSize=512m
+        -XX:+UseG1GC
+        -XX:MaxGCPauseMillis=200
+        -XX:+UseStringDeduplication
+    deploy:
+      resources:
+        limits:
+          cpus: '4'          # 4 Cores
+          memory: 4G         # 4GB
+        reservations:
+          cpus: '2'
+          memory: 2G
+
+  # ================================================
+  # Application Server - Profile: peak (피크 대응)
+  # ================================================
+  app-peak:
+    build: .
+    container_name: ecommerce-app-peak
+    profiles: ["peak"]
+    depends_on:
+      - mysql
+      - redis
+      - kafka
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/ecommerce
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      JAVA_OPTS: >
+        -Xms4g
+        -Xmx4g
+        -XX:MaxMetaspaceSize=512m
+        -XX:+UseG1GC
+        -XX:MaxGCPauseMillis=100
+        -XX:+UseStringDeduplication
+        -XX:+ParallelRefProcEnabled
+    deploy:
+      resources:
+        limits:
+          cpus: '8'          # 8 Cores
+          memory: 8G         # 8GB
+        reservations:
+          cpus: '4'
+          memory: 4G
+
+  # ================================================
+  # Monitoring: Prometheus (선택)
+  # ================================================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: ecommerce-prometheus
+    profiles: ["monitoring"]
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+
+  # ================================================
+  # Monitoring: Grafana (선택)
+  # ================================================
+  grafana:
+    image: grafana/grafana:latest
+    container_name: ecommerce-grafana
+    profiles: ["monitoring"]
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana-data:/var/lib/grafana
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+volumes:
+  grafana-data:
